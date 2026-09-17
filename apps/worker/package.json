@@ -1,0 +1,13 @@
+{
+  "name": "@m3ak/worker",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0"
+  }
+}
