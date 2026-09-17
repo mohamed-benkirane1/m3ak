@@ -30,8 +30,9 @@ m3ak/
 
 ## Prérequis
 
-- Node.js >= 20
+- Node.js >= 20.19.0
 - npm >= 10
+- Docker Desktop / Docker Engine avec Docker Compose (pour l'environnement conteneurisé)
 
 ## Commandes disponibles
 
@@ -46,6 +47,41 @@ Par workspace :
 ```bash
 npm run dev --workspace @m3ak/web    # démarre le frontend en développement
 npm run start --workspace @m3ak/api  # démarre l'API après build
+```
+
+## Environnement Docker
+
+Cinq services : `web`, `api`, `worker`, `postgres`, `redis`.
+
+> Le worker ne fait pour l'instant que rester actif (infrastructure provisoire) :
+> aucune file de tâches réelle n'existe encore. L'API n'expose que sa route
+> racine (`GET /`) — le endpoint `/health` n'existe pas encore.
+
+Démarrer l'ensemble :
+
+```bash
+docker compose up -d --build
+```
+
+Arrêter l'ensemble :
+
+```bash
+docker compose down
+```
+
+Ports exposés sur l'hôte :
+
+- web : http://localhost:5173
+- api : http://localhost:3001
+- postgres : localhost:5432 (développement local uniquement)
+- redis : localhost:6379 (développement local uniquement)
+
+Logs utiles :
+
+```bash
+docker compose ps
+docker compose logs --tail=100
+docker compose logs -f api
 ```
 
 ## Documentation
