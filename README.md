@@ -54,8 +54,7 @@ npm run start --workspace @m3ak/api  # démarre l'API après build
 Cinq services : `web`, `api`, `worker`, `postgres`, `redis`.
 
 > Le worker ne fait pour l'instant que rester actif (infrastructure provisoire) :
-> aucune file de tâches réelle n'existe encore. L'API n'expose que sa route
-> racine (`GET /`) — le endpoint `/health` n'existe pas encore.
+> aucune file de tâches réelle n'existe encore.
 
 Démarrer l'ensemble :
 
@@ -83,6 +82,22 @@ docker compose ps
 docker compose logs --tail=100
 docker compose logs -f api
 ```
+
+### Routes API
+
+- `GET /` — identification simple du service (`{"service":"m3ak-api"}`).
+- `GET /health` — vérifie réellement la disponibilité de PostgreSQL (`SELECT 1`) et de Redis (`PING`) :
+  - `200` si PostgreSQL **et** Redis répondent ;
+  - `503` si l'une des deux dépendances ne répond pas.
+
+  ```json
+  {
+    "status": "healthy",
+    "checks": { "api": "healthy", "postgres": "healthy", "redis": "healthy" }
+  }
+  ```
+
+  Le service Docker `api` est marqué `healthy` uniquement lorsque `GET /health` répond `200`.
 
 ## Documentation
 
