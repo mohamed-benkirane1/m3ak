@@ -4,12 +4,12 @@ import { postgresPool } from "../infrastructure/postgres";
 import { withTimeout } from "../infrastructure/timeout";
 import { ProductRefInputSchema, SearchProductsInputSchema } from "./schemas";
 
-const CATALOGUE_QUERY_TIMEOUT_MS = 3_000;
+export const CATALOGUE_QUERY_TIMEOUT_MS = 3_000;
 
-const PRODUCT_COLUMNS =
+export const PRODUCT_COLUMNS =
   "ref, model, family, gender, color, size, material, season, price_cents, stock, barcode, weight_grams";
 
-interface ProductRow {
+export interface ProductRow {
   ref: string;
   model: string;
   family: string;
@@ -33,7 +33,7 @@ export type AvailabilityResult =
 // M3AK decision: Product.weight means grams (DB weight_grams maps 1:1, no conversion).
 // restock_delay_days / imported_at are never selected here at all: not merely hidden,
 // structurally absent from the query, so there is nothing to leak later.
-function mapRowToProduct(row: ProductRow): Product {
+export function mapRowToProduct(row: ProductRow): Product {
   return ProductSchema.parse({
     ref: row.ref,
     model: row.model,
