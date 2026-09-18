@@ -1,3 +1,4 @@
+import { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import { DeliveryZone, DeliveryZoneSchema } from "@m3ak/shared";
 import { centimesToMad } from "../infrastructure/money";
@@ -12,8 +13,18 @@ const DELIVERY_QUERY_TIMEOUT_MS = 3_000;
 // No arbitrary max length — a city name that does not match the grid simply
 // resolves to found:false regardless of length, and this is an equality
 // lookup, never a LIKE/ILIKE pattern, so an unbounded string is not a
-// performance or injection risk.
-const CityInputSchema = z.string().trim().min(1);
+// performance or injection risk. Exported (TASK-012) so createOrder validates
+// its own `city` input with this exact same rule rather than a parallel copy.
+export const DeliveryCityInputSchema = z.string().trim().min(1);
+
+// Accepts either the shared pool or a single checked-out transaction client
+// (same pattern already established in cart.ts).
+type Queryable = Pool | PoolClient;
+
+interface GetDeliveryOptionsOptions {
+  executor?: Queryable;
+  useClientTimeout?: boolean;
+}
 
 interface DeliveryZoneRow {
   city: string;
@@ -24,7 +35,7 @@ interface DeliveryZoneRow {
 }
 
 export type DeliveryLookupResult =
-  | { found: true; zone: DeliveryZone }
+  | { found: true; zone: DeliveryZone; feeCents: number }
   | { found: false; city: string; reason: "city_not_in_delivery_grid" };
 
 function mapRowToDeliveryZone(row: DeliveryZoneRow): DeliveryZone {
@@ -37,19 +48,24 @@ function mapRowToDeliveryZone(row: DeliveryZoneRow): DeliveryZone {
   });
 }
 
-export async function getDeliveryOptions(rawCity: unknown): Promise<DeliveryLookupResult> {
-  const city = CityInputSchema.parse(rawCity);
+export async function getDeliveryOptions(
+  rawCity: unknown,
+  options: GetDeliveryOptionsOptions = {},
+): Promise<DeliveryLookupResult> {
+  const { executor = postgresPool, useClientTimeout = true } = options;
+  const city = DeliveryCityInputSchema.parse(rawCity);
 
-  const { rows } = await withTimeout(
-    postgresPool.query<DeliveryZoneRow>(
-      `SELECT city, fee_cents, delay_hours, cash_on_delivery, store_pickup
+  const sql = `SELECT city, fee_cents, delay_hours, cash_on_delivery, store_pickup
        FROM delivery_zones
-       WHERE lower(city) = lower($1)`,
-      [city],
-    ),
-    DELIVERY_QUERY_TIMEOUT_MS,
-    "getDeliveryOptions",
-  );
+       WHERE lower(city) = lower($1)`;
+
+  // Transaction mode (useClientTimeout:false, TASK-012's createOrder): no
+  // client-side race against a query already running inside a caller-managed
+  // transaction — server-side statement_timeout/lock_timeout (set by the
+  // caller) is the only timeout mechanism there.
+  const { rows } = useClientTimeout
+    ? await withTimeout(executor.query<DeliveryZoneRow>(sql, [city]), DELIVERY_QUERY_TIMEOUT_MS, "getDeliveryOptions")
+    : await executor.query<DeliveryZoneRow>(sql, [city]);
 
   if (rows.length === 0) {
     return { found: false, city, reason: "city_not_in_delivery_grid" };
@@ -63,5 +79,10 @@ export async function getDeliveryOptions(rawCity: unknown): Promise<DeliveryLook
     throw new Error(`Integrity error: ${rows.length} delivery zones found for city "${city}" (expected at most 1)`);
   }
 
-  return { found: true, zone: mapRowToDeliveryZone(rows[0] as DeliveryZoneRow) };
+  const row = rows[0] as DeliveryZoneRow;
+  // feeCents alongside the MAD-converted zone (TASK-012): authoritative order
+  // totals must stay integer-cents throughout, never round-tripped back from
+  // the MAD `zone.fee` the way the rest of this codebase deliberately avoids
+  // for cents -> MAD -> cents conversions elsewhere (see promotions.ts).
+  return { found: true, zone: mapRowToDeliveryZone(row), feeCents: row.fee_cents };
 }

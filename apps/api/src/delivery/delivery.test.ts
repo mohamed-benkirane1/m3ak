@@ -1,7 +1,8 @@
 import { DeliveryZoneSchema } from "@m3ak/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { postgresPool } from "../infrastructure/postgres";
-import { getDeliveryOptions } from "./delivery";
+import * as timeoutModule from "../infrastructure/timeout";
+import { DeliveryCityInputSchema, getDeliveryOptions } from "./delivery";
 
 interface DeliveryZoneRowFixture {
   city: string;
@@ -79,7 +80,15 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ fee_cents: 3500 })],
     } as never);
     const result = await getDeliveryOptions("Fès");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ fee: 35 }) });
+    expect(result).toEqual({ found: true, zone: expect.objectContaining({ fee: 35 }), feeCents: expect.any(Number) });
+  });
+
+  it("F2: also exposes the raw fee_cents (TASK-012 cents-safe order totals)", async () => {
+    vi.spyOn(postgresPool, "query").mockResolvedValueOnce({
+      rows: [makeDeliveryZoneRow({ fee_cents: 3500 })],
+    } as never);
+    const result = await getDeliveryOptions("Fès");
+    expect(result).toEqual({ found: true, zone: expect.objectContaining({ fee: 35 }), feeCents: 3500 });
   });
 
   it("G: preserves delay_hours exactly as delayHours", async () => {
@@ -87,7 +96,7 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ delay_hours: 24 })],
     } as never);
     const result = await getDeliveryOptions("Fès");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ delayHours: 24 }) });
+    expect(result).toEqual({ found: true, zone: expect.objectContaining({ delayHours: 24 }), feeCents: expect.any(Number) });
   });
 
   it("H: preserves cash_on_delivery=true", async () => {
@@ -95,7 +104,11 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ cash_on_delivery: true })],
     } as never);
     const result = await getDeliveryOptions("Casablanca");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ cashOnDelivery: true }) });
+    expect(result).toEqual({
+      found: true,
+      zone: expect.objectContaining({ cashOnDelivery: true }),
+      feeCents: expect.any(Number),
+    });
   });
 
   it("I: preserves cash_on_delivery=false", async () => {
@@ -103,7 +116,11 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ cash_on_delivery: false })],
     } as never);
     const result = await getDeliveryOptions("Tanger");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ cashOnDelivery: false }) });
+    expect(result).toEqual({
+      found: true,
+      zone: expect.objectContaining({ cashOnDelivery: false }),
+      feeCents: expect.any(Number),
+    });
   });
 
   it("J: preserves store_pickup=true", async () => {
@@ -111,7 +128,11 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ store_pickup: true })],
     } as never);
     const result = await getDeliveryOptions("Casablanca");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ storePickup: true }) });
+    expect(result).toEqual({
+      found: true,
+      zone: expect.objectContaining({ storePickup: true }),
+      feeCents: expect.any(Number),
+    });
   });
 
   it("K: preserves store_pickup=false", async () => {
@@ -119,7 +140,11 @@ describe("getDeliveryOptions — field mapping (F, G, H, I, J, K, L)", () => {
       rows: [makeDeliveryZoneRow({ store_pickup: false })],
     } as never);
     const result = await getDeliveryOptions("Rabat");
-    expect(result).toEqual({ found: true, zone: expect.objectContaining({ storePickup: false }) });
+    expect(result).toEqual({
+      found: true,
+      zone: expect.objectContaining({ storePickup: false }),
+      feeCents: expect.any(Number),
+    });
   });
 
   it("L: the returned zone passes DeliveryZoneSchema", async () => {
@@ -189,5 +214,50 @@ describe("getDeliveryOptions — security and integrity (P, Q, R, S, T)", () => 
     expect(sql).not.toMatch(/historical_orders/i);
     expect(sql).not.toMatch(/historical_order_items/i);
     expect(sql).toMatch(/delivery_zones/i);
+  });
+});
+
+describe("getDeliveryOptions — TASK-012 transaction-aware executor (U, V, W, X)", () => {
+  it("U: DeliveryCityInputSchema exported behavior is unchanged (trim, non-empty, no max)", () => {
+    expect(DeliveryCityInputSchema.safeParse("  Rabat  ").success).toBe(true);
+    expect(DeliveryCityInputSchema.parse("  Rabat  ")).toBe("Rabat");
+    expect(DeliveryCityInputSchema.safeParse("").success).toBe(false);
+    expect(DeliveryCityInputSchema.safeParse("   ").success).toBe(false);
+    expect(DeliveryCityInputSchema.safeParse("x".repeat(500)).success).toBe(true);
+  });
+
+  it("V: default call (no options) behaves exactly as before — uses postgresPool and withTimeout", async () => {
+    const timeoutSpy = vi.spyOn(timeoutModule, "withTimeout");
+    const poolSpy = vi.spyOn(postgresPool, "query").mockResolvedValueOnce({
+      rows: [makeDeliveryZoneRow()],
+    } as never);
+
+    const result = await getDeliveryOptions("Casablanca");
+
+    expect(result.found).toBe(true);
+    expect(poolSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("W: an explicit executor is used instead of postgresPool, and postgresPool is never called", async () => {
+    const poolSpy = vi.spyOn(postgresPool, "query");
+    const fakeExecutor = { query: vi.fn().mockResolvedValueOnce({ rows: [makeDeliveryZoneRow()] }) };
+
+    const result = await getDeliveryOptions("Casablanca", { executor: fakeExecutor as never });
+
+    expect(result.found).toBe(true);
+    expect(fakeExecutor.query).toHaveBeenCalledTimes(1);
+    expect(poolSpy).not.toHaveBeenCalled();
+  });
+
+  it("X: useClientTimeout:false bypasses withTimeout entirely, using the executor directly", async () => {
+    const timeoutSpy = vi.spyOn(timeoutModule, "withTimeout");
+    const fakeExecutor = { query: vi.fn().mockResolvedValueOnce({ rows: [makeDeliveryZoneRow()] }) };
+
+    const result = await getDeliveryOptions("Casablanca", { executor: fakeExecutor as never, useClientTimeout: false });
+
+    expect(result.found).toBe(true);
+    expect(fakeExecutor.query).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { PromotionSchema } from "@m3ak/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { postgresPool } from "../infrastructure/postgres";
+import * as timeoutModule from "../infrastructure/timeout";
 import { getApplicablePromotion, getProductPricingContext, validateDiscount } from "./promotions";
 import type { ProductRow } from "./products";
 
@@ -495,6 +496,56 @@ describe("getProductPricingContext — TASK-011 cents-safe pricing helper (PA-PD
     vi.spyOn(postgresPool, "query").mockResolvedValueOnce({ rows: [] } as never);
     const result = await getProductPricingContext("REF-9999", "2026-09-15");
     expect(result).toEqual({ found: false, ref: "REF-9999" });
+  });
+});
+
+describe("getProductPricingContext — TASK-012 transaction-aware executor (PE, PF, PG)", () => {
+  it("PE: default (no options) call is unaffected — uses postgresPool and withTimeout, exactly as before", async () => {
+    const timeoutSpy = vi.spyOn(timeoutModule, "withTimeout");
+    const poolSpy = vi.spyOn(postgresPool, "query");
+    poolSpy.mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0001", price_cents: 10000, stock: 2 })] } as never);
+    poolSpy.mockResolvedValueOnce({ rows: [] } as never);
+
+    const result = await getProductPricingContext("REF-0001", "2026-09-15");
+
+    expect(result.found).toBe(true);
+    expect(poolSpy).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("PF: an explicit executor is used instead of postgresPool, and postgresPool is never called", async () => {
+    const poolSpy = vi.spyOn(postgresPool, "query");
+    const fakeExecutor = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0001", price_cents: 10000, stock: 2 })] })
+        .mockResolvedValueOnce({ rows: [] }),
+    };
+
+    const result = await getProductPricingContext("REF-0001", "2026-09-15", { executor: fakeExecutor as never });
+
+    expect(result.found).toBe(true);
+    expect(fakeExecutor.query).toHaveBeenCalledTimes(2);
+    expect(poolSpy).not.toHaveBeenCalled();
+  });
+
+  it("PG: useClientTimeout:false bypasses withTimeout entirely, using the executor directly", async () => {
+    const timeoutSpy = vi.spyOn(timeoutModule, "withTimeout");
+    const fakeExecutor = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0001", price_cents: 10000, stock: 2 })] })
+        .mockResolvedValueOnce({ rows: [] }),
+    };
+
+    const result = await getProductPricingContext("REF-0001", "2026-09-15", {
+      executor: fakeExecutor as never,
+      useClientTimeout: false,
+    });
+
+    expect(result.found).toBe(true);
+    expect(fakeExecutor.query).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy).not.toHaveBeenCalled();
   });
 });
 

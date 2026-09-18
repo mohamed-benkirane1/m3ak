@@ -1,9 +1,22 @@
+import { Pool, PoolClient } from "pg";
 import { IsoDateSchema, Product, Promotion, PromotionSchema } from "@m3ak/shared";
 import { centimesToMad } from "../infrastructure/money";
 import { postgresPool } from "../infrastructure/postgres";
 import { withTimeout } from "../infrastructure/timeout";
 import { CATALOGUE_QUERY_TIMEOUT_MS, mapRowToProduct, PRODUCT_COLUMNS, ProductRow } from "./products";
 import { ProductRefInputSchema } from "./schemas";
+
+// Accepts either the shared pool or a single checked-out transaction client
+// (same pattern already established in cart.ts/delivery.ts). useClientTimeout
+// defaults to true so every existing 2-argument caller keeps its exact current
+// behavior; TASK-012's createOrder passes { executor: client, useClientTimeout:
+// false } to read on its own transaction without racing a client-side timer
+// against a query already governed by that transaction's own server-side
+// statement_timeout.
+interface PricingExecutionOptions {
+  executor?: Pool | PoolClient;
+  useClientTimeout?: boolean;
+}
 
 // The only condition string audited across all 12 real Kenza promotions
 // (TASK-009B). It requires no context beyond product ref + as-of date: it is
@@ -113,12 +126,17 @@ type ResolvedPromotionContext =
 // risk this module exists to avoid, even though it happens to be lossless
 // for realistic prices. Sharing this resolver keeps both functions using the
 // exact same DB queries and business rules, deliberately not exported.
-async function resolvePromotionContext(ref: string, asOfDate: string): Promise<ResolvedPromotionContext> {
-  const productResult = await withTimeout(
-    postgresPool.query<ProductRow>(`SELECT ${PRODUCT_COLUMNS} FROM products WHERE ref = $1`, [ref]),
-    CATALOGUE_QUERY_TIMEOUT_MS,
-    "promotions:product",
-  );
+async function resolvePromotionContext(
+  ref: string,
+  asOfDate: string,
+  options: PricingExecutionOptions = {},
+): Promise<ResolvedPromotionContext> {
+  const { executor = postgresPool, useClientTimeout = true } = options;
+
+  const productSql = `SELECT ${PRODUCT_COLUMNS} FROM products WHERE ref = $1`;
+  const productResult = useClientTimeout
+    ? await withTimeout(executor.query<ProductRow>(productSql, [ref]), CATALOGUE_QUERY_TIMEOUT_MS, "promotions:product")
+    : await executor.query<ProductRow>(productSql, [ref]);
   if (productResult.rows.length === 0) {
     return { found: false };
   }
@@ -130,17 +148,17 @@ async function resolvePromotionContext(ref: string, asOfDate: string): Promise<R
   // reformatted via getDate()/toLocaleDateString(). Casting to text in SQL
   // sidesteps this entirely — the value is a plain 'YYYY-MM-DD' string the
   // moment it reaches JS, never a Date object.
-  const promotionResult = await withTimeout(
-    postgresPool.query<PromotionRow>(
-      `SELECT id, product_ref, normal_price_cents, promo_price_cents,
+  const promotionSql = `SELECT id, product_ref, normal_price_cents, promo_price_cents,
               starts_at::text AS starts_at, ends_at::text AS ends_at, condition
        FROM promotions
-       WHERE product_ref = $1 AND starts_at <= $2::date AND ends_at >= $2::date`,
-      [ref, asOfDate],
-    ),
-    CATALOGUE_QUERY_TIMEOUT_MS,
-    "promotions:activePromotion",
-  );
+       WHERE product_ref = $1 AND starts_at <= $2::date AND ends_at >= $2::date`;
+  const promotionResult = useClientTimeout
+    ? await withTimeout(
+        executor.query<PromotionRow>(promotionSql, [ref, asOfDate]),
+        CATALOGUE_QUERY_TIMEOUT_MS,
+        "promotions:activePromotion",
+      )
+    : await executor.query<PromotionRow>(promotionSql, [ref, asOfDate]);
 
   if (promotionResult.rows.length === 0) {
     return { found: true, productRow, promotionRow: null };
@@ -197,11 +215,12 @@ export type ProductPricingContextResult =
 export async function getProductPricingContext(
   rawRef: unknown,
   rawAsOfDate: unknown,
+  options: PricingExecutionOptions = {},
 ): Promise<ProductPricingContextResult> {
   const ref = ProductRefInputSchema.parse(rawRef);
   const asOfDate = IsoDateSchema.parse(rawAsOfDate);
 
-  const context = await resolvePromotionContext(ref, asOfDate);
+  const context = await resolvePromotionContext(ref, asOfDate, options);
   if (!context.found) {
     return { found: false, ref };
   }
