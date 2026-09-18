@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-// Design decision, not an official sourced value (TASK-014A): "fast" model
-// traffic should fail well before a human would call it fast anyway.
-const FAST_LLM_TIMEOUT_MS = 15_000;
+// Design decision, not an official sourced value (TASK-014A): a safe generic
+// ceiling when a caller does not specify its own policy.
+const DEFAULT_LLM_TIMEOUT_MS = 15_000;
 
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -15,6 +15,14 @@ export interface ChatTransportConfig {
   url: string;
   apiKey: string;
   model: string;
+}
+
+// Timeout is client policy (how long THIS caller is willing to wait), never
+// provider identity/config — kept separate from ChatTransportConfig on
+// purpose (TASK-015 HACK-CTRL) so the fast and reasoning clients can each own
+// their own value without it leaking into endpoint/auth/model configuration.
+export interface ChatRequestOptions {
+  timeoutMs?: number;
 }
 
 export type LlmErrorCategory =
@@ -109,6 +117,16 @@ function categorizeHttpStatus(status: number): LlmErrorCategory {
   return "http_error";
 }
 
+function validateTimeoutMs(timeoutMs: number | undefined): number {
+  if (timeoutMs === undefined) {
+    return DEFAULT_LLM_TIMEOUT_MS;
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new LlmError("config_error", `Invalid LLM client configuration: timeoutMs must be a positive integer, got ${timeoutMs}`);
+  }
+  return timeoutMs;
+}
+
 // The one HTTP mechanic shared by every OpenAI-Chat-Completions-shaped client
 // this project builds (TASK-014's fast client today, TASK-015's reasoning
 // client next). Provider-mechanical only: no env reads, no model-selection
@@ -119,9 +137,14 @@ function categorizeHttpStatus(status: number): LlmErrorCategory {
 // implements a minimal Chat-Completions-shaped request/response as an
 // explicit architecture decision, contained by strict-but-tolerant response
 // validation that fails loudly (never silently) if the real contract differs.
-export async function requestChatCompletion(rawConfig: ChatTransportConfig, rawMessages: ChatMessage[]): Promise<string> {
+export async function requestChatCompletion(
+  rawConfig: ChatTransportConfig,
+  rawMessages: ChatMessage[],
+  options: ChatRequestOptions = {},
+): Promise<string> {
   const config = validateChatTransportConfig(rawConfig);
   const messages = MessagesInputSchema.parse(rawMessages);
+  const timeoutMs = validateTimeoutMs(options.timeoutMs);
 
   let response: Response;
   try {
@@ -132,12 +155,12 @@ export async function requestChatCompletion(rawConfig: ChatTransportConfig, rawM
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({ model: config.model, messages }),
-      signal: AbortSignal.timeout(FAST_LLM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const name = error instanceof Error ? error.name : undefined;
     if (name === "TimeoutError" || name === "AbortError") {
-      throw new LlmError("timeout_error", `LLM request timed out after ${FAST_LLM_TIMEOUT_MS}ms`);
+      throw new LlmError("timeout_error", `LLM request timed out after ${timeoutMs}ms`);
     }
     throw new LlmError("network_error", "LLM request failed due to a network error", { cause: error });
   }

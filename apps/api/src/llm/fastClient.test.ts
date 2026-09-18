@@ -409,4 +409,14 @@ describe("network and timeout (AP-AT)", () => {
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("TASK-015 regression: the fast client still uses the transport default timeout (15_000ms), unaffected by the timeoutMs refactor", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const client = createFastLlmClient(VALID_CONFIG);
+
+    await client.chat(VALID_MESSAGES);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+  });
 });

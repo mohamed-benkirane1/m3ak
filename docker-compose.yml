@@ -51,6 +51,7 @@ services:
       LLM_URL: ${LLM_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_FAST_MODEL: ${LLM_FAST_MODEL:-}
+      LLM_REASONING_MODEL: ${LLM_REASONING_MODEL:-}
     ports:
       - "${API_PORT:-3001}:3001"
     depends_on:
