@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { PoolClient } from "pg";
 import { z } from "zod";
 import { IsoDateSchema, Order, OrderSchema, PaymentMethod, PaymentMethodSchema } from "@m3ak/shared";
@@ -31,7 +30,7 @@ export type PriceChange = {
 };
 
 export type CreateOrderResult =
-  | { created: true; order: Order }
+  | { created: true; replayed: boolean; order: Order }
   | { created: false; reason: "confirmation_required" }
   | { created: false; reason: "cart_not_found" }
   | { created: false; reason: "empty_cart" }
@@ -45,13 +44,41 @@ export type CreateOrderResult =
     }
   | { created: false; reason: "price_changed"; changes: PriceChange[] }
   | { created: false; reason: "delivery_not_found"; city: string }
-  | { created: false; reason: "payment_not_allowed_for_delivery_zone"; city: string; paymentMethod: PaymentMethod };
+  | { created: false; reason: "payment_not_allowed_for_delivery_zone"; city: string; paymentMethod: PaymentMethod }
+  | { created: false; reason: "idempotency_conflict" };
 
 interface CartLockRow {
   id: string;
   conversation_id: string;
   customer_id: string;
+  version: number;
 }
+
+interface ExistingOrderRow {
+  id: string;
+  customer_id: string;
+  conversation_id: string;
+  status: string;
+  products_total_cents: number;
+  delivery_fee_cents: number;
+  total_cents: number;
+  city: string;
+  payment_method: string;
+  created_at: Date;
+  city_matches: boolean;
+}
+
+interface ExistingOrderItemRow {
+  id: string;
+  product_ref: string;
+  quantity: number;
+  unit_price_cents: number;
+}
+
+type ExistingOrderReplayResult =
+  | { found: false }
+  | { found: true; conflict: true }
+  | { found: true; conflict: false; order: Order };
 
 interface CartItemRow {
   product_ref: string;
@@ -127,6 +154,98 @@ async function withOrderTransaction<T>(fn: (client: PoolClient) => Promise<TxOut
   }
 }
 
+// Deterministic, purely textual — no hashing, no randomness, no city/payment/
+// date. Same cart id + same cart version = same logical confirmation attempt
+// (TASK-013 architecture decision): a real cart mutation always changes
+// version (proven: every content-changing cart.ts mutation increments it,
+// every true no-op does not), so a genuinely new order from otherwise
+// identical articles requires a new cart or at least one cart mutation —
+// never a second call against an unchanged cart, which is treated as the same
+// confirmation, consistent with CLAUDE.md §20's enumerated failure modes
+// (double-click, repeated message, network retry, graph retry) — none of
+// which describe an intentionally repeated purchase.
+function buildOrderIdempotencyKey(cartId: string, cartVersion: number): string {
+  return `cart:${cartId}:v${cartVersion}`;
+}
+
+// Single source of truth for replay detection, reused by both the early check
+// (before any business validation) and the ON CONFLICT fallback (after a
+// same-key race on the final INSERT) — both call sites must apply IDENTICAL
+// integrity/binding rules. Never consults delivery_zones/products/promotions:
+// a replay returns only what was already durably committed.
+async function loadExistingOrderReplay(
+  client: PoolClient,
+  idempotencyKey: string,
+  city: string,
+  paymentMethod: PaymentMethod,
+  expectedConversationId: string,
+  expectedCustomerId: string,
+): Promise<ExistingOrderReplayResult> {
+  const orderResult = await client.query<ExistingOrderRow>(
+    `SELECT id, customer_id, conversation_id, status, products_total_cents, delivery_fee_cents, total_cents,
+            city, payment_method, created_at,
+            (lower(city) = lower($2)) AS city_matches
+     FROM orders
+     WHERE idempotency_key = $1`,
+    [idempotencyKey, city],
+  );
+  if (orderResult.rows.length === 0) {
+    return { found: false };
+  }
+  const row = orderResult.rows[0] as ExistingOrderRow;
+
+  // Structurally impossible in normal operation: the key embeds the exact
+  // cart id, and carts.conversation_id never changes after createCart. A
+  // mismatch here is database integrity corruption, never ordinary caller
+  // misuse — thrown, never modeled as idempotency_conflict.
+  if (row.customer_id !== expectedCustomerId) {
+    throw new Error("Integrity error: idempotent order customer does not match locked cart customer");
+  }
+  if (row.conversation_id !== expectedConversationId) {
+    throw new Error("Integrity error: idempotent order conversation does not match locked cart conversation");
+  }
+
+  // Legitimate same-key, materially-different request: city compared via the
+  // same lower(...) semantics as getDeliveryOptions (accents stay significant,
+  // no unaccent, no JS locale case-folding) without ever consulting
+  // delivery_zones again; paymentMethod via exact match (already
+  // enum-canonicalized by PaymentMethodSchema, no case folding applicable).
+  if (!row.city_matches || row.payment_method !== paymentMethod) {
+    return { found: true, conflict: true };
+  }
+
+  const itemsResult = await client.query<ExistingOrderItemRow>(
+    // product_ref, id: order_items deliberately has no UNIQUE(order_id,
+    // product_ref) (design.md/migration comment), so id is the deterministic
+    // tie-breaker even if duplicate refs somehow exist.
+    `SELECT id, product_ref, quantity, unit_price_cents FROM order_items WHERE order_id = $1 ORDER BY product_ref, id`,
+    [row.id],
+  );
+
+  // Stored facts only — never re-derived from current stock/pricing/delivery.
+  // Throws (never silently repaired) if the stored data is malformed, e.g. no
+  // items, out-of-schema money, or an unparsable created_at.
+  const order = OrderSchema.parse({
+    id: row.id,
+    customerId: row.customer_id,
+    conversationId: row.conversation_id,
+    status: row.status,
+    productsTotal: centimesToMad(row.products_total_cents),
+    deliveryFee: centimesToMad(row.delivery_fee_cents),
+    total: centimesToMad(row.total_cents),
+    city: row.city,
+    paymentMethod: row.payment_method,
+    items: itemsResult.rows.map((item) => ({
+      productRef: item.product_ref,
+      quantity: item.quantity,
+      unitPrice: centimesToMad(item.unit_price_cents),
+    })),
+    createdAt: row.created_at.toISOString(),
+  });
+
+  return { found: true, conflict: false, order };
+}
+
 export async function createOrder(
   rawCartId: unknown,
   rawConfirmed: unknown,
@@ -148,9 +267,10 @@ export async function createOrder(
 
   return withOrderTransaction<CreateOrderResult>(async (client) => {
     // 1. Lock the cart row only (never the joined conversation row) and derive
-    // customer/conversation from the DB relation — never accepted from the caller.
+    // customer/conversation/version from the DB relation — never accepted
+    // from the caller. version drives the idempotency identity below.
     const cartLock = await client.query<CartLockRow>(
-      `SELECT c.id, c.conversation_id, co.customer_id
+      `SELECT c.id, c.conversation_id, co.customer_id, c.version
        FROM carts c
        JOIN conversations co ON co.id = c.conversation_id
        WHERE c.id = $1
@@ -160,7 +280,30 @@ export async function createOrder(
     if (cartLock.rows.length === 0) {
       return { commit: false, value: { created: false, reason: "cart_not_found" } };
     }
-    const { conversation_id: conversationId, customer_id: customerId } = cartLock.rows[0] as CartLockRow;
+    const {
+      conversation_id: conversationId,
+      customer_id: customerId,
+      version: cartVersion,
+    } = cartLock.rows[0] as CartLockRow;
+    if (!Number.isInteger(cartVersion) || cartVersion < 0) {
+      throw new Error(`Integrity error: locked cart "${cartId}" has an invalid version (${cartVersion})`);
+    }
+
+    // 1b. Idempotency replay check — BEFORE any business validation. A valid
+    // replay or a binding conflict must never touch cart_items/products/
+    // promotions/delivery_zones, never lock product rows, never decrement
+    // stock: it only reports what a PRIOR transaction already committed.
+    const idempotencyKey = buildOrderIdempotencyKey(cartId, cartVersion);
+    const replay = await loadExistingOrderReplay(client, idempotencyKey, city, paymentMethod, conversationId, customerId);
+    if (replay.found) {
+      if (replay.conflict) {
+        return { commit: false, value: { created: false, reason: "idempotency_conflict" } };
+      }
+      // No write occurred this transaction: ROLLBACK (not COMMIT) releases
+      // the cart lock immediately and never exposes this read-only replay to
+      // COMMIT-acknowledgement ambiguity.
+      return { commit: false, value: { created: true, replayed: true, order: replay.order } };
+    }
 
     // 2. Cart items, deterministic order. No status/version check or mutation:
     // no authoritative cart-status vocabulary exists (TASK-011A).
@@ -278,17 +421,18 @@ export async function createOrder(
     const totalCents = productsTotalCents + deliveryFeeCents;
     assertPostgresIntegerRange(totalCents, "totalCents");
 
-    // 8. Idempotency key — mechanically required by orders.idempotency_key's
-    // NOT NULL UNIQUE constraint only. This does NOT provide retry safety: a
-    // retry after a failed/ambiguous attempt generates a fresh key and would
-    // create a second order. Closing that gap is TASK-013's job.
-    const idempotencyKey = randomUUID();
-
-    // 9. Insert the order. No second SELECT afterward — RETURNING supplies
-    // everything needed to build the final Order.
+    // 8. Insert the order using the SAME deterministic key derived in step 1b.
+    // ON CONFLICT (idempotency_key) DO NOTHING is defense-in-depth for a
+    // same-cart/same-version race: the cart FOR UPDATE lock already serializes
+    // any two calls that could ever derive this exact key (it embeds cartId),
+    // so this branch is expected to be unreachable in practice — see fallback
+    // below for the (structurally near-impossible) case where it still fires.
+    // No second SELECT on the success path — RETURNING supplies everything
+    // needed to build the final Order.
     const orderInsert = await client.query<CreatedOrderRow>(
       `INSERT INTO orders (customer_id, conversation_id, status, products_total_cents, delivery_fee_cents, total_cents, city, payment_method, idempotency_key)
        VALUES ($1, $2, 'confirmed', $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id, customer_id, conversation_id, status, products_total_cents, delivery_fee_cents, total_cents, city, payment_method, created_at`,
       [
         customerId,
@@ -301,9 +445,25 @@ export async function createOrder(
         idempotencyKey,
       ],
     );
+    if (orderInsert.rows.length === 0) {
+      // Lost a same-key race: no order/order-item/stock write has happened
+      // yet in THIS transaction (this INSERT was the first write attempted),
+      // so falling back to a read-only replay here is exactly as safe as the
+      // early check — same helper, identical binding/integrity semantics.
+      const fallback = await loadExistingOrderReplay(client, idempotencyKey, city, paymentMethod, conversationId, customerId);
+      if (!fallback.found) {
+        throw new Error(
+          `Integrity error: order INSERT reported a conflict for idempotency key "${idempotencyKey}" but no matching order could be loaded`,
+        );
+      }
+      if (fallback.conflict) {
+        return { commit: false, value: { created: false, reason: "idempotency_conflict" } };
+      }
+      return { commit: false, value: { created: true, replayed: true, order: fallback.order } };
+    }
     const orderRow = orderInsert.rows[0] as CreatedOrderRow;
 
-    // 10. Order items, sequentially — item count is small; correctness and
+    // 9. Order items, sequentially — item count is small; correctness and
     // readability outweigh the negligible round-trip cost of a loop here.
     // unit_price_cents is always the CURRENT authoritative price, never the
     // stale cart snapshot (guaranteed equal at this point, since any mismatch
@@ -315,7 +475,7 @@ export async function createOrder(
       );
     }
 
-    // 11. Stock decrement last — reads as a consequence of the order now
+    // 10. Stock decrement last — reads as a consequence of the order now
     // existing. `stock >= $2` is structurally redundant given the lock and
     // prior validation, kept as defense-in-depth; 0 rows affected is an
     // integrity error, never remapped to insufficient_stock.
@@ -331,7 +491,7 @@ export async function createOrder(
       }
     }
 
-    // 12. Build and validate the final Order BEFORE COMMIT (HACK-CTRL,
+    // 11. Build and validate the final Order BEFORE COMMIT (HACK-CTRL,
     // TASK-012B §25): if mapping/schema validation fails, it fails inside this
     // callback, the transaction rolls back, and no order survives. Nothing
     // after this point (back in withOrderTransaction) can throw before
@@ -354,6 +514,6 @@ export async function createOrder(
       createdAt: orderRow.created_at.toISOString(),
     });
 
-    return { commit: true, value: { created: true, order: validatedOrder } };
+    return { commit: true, value: { created: true, replayed: false, order: validatedOrder } };
   });
 }

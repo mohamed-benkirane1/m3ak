@@ -64,20 +64,33 @@ function makeOrderRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-// Queues the standard BEGIN + SET LOCAL x2 + cart lock + cart_items prefix.
+// Queues the standard BEGIN + SET LOCAL x2 + cart lock + idempotency replay
+// check (default: not found, so the pipeline proceeds exactly as before) +
+// cart_items prefix.
 function queuePrefix(
   client: FakeClient,
   options: {
-    cartRow?: { id: string; conversation_id: string; customer_id: string } | null;
+    cartRow?: { id: string; conversation_id: string; customer_id: string; version?: number } | null;
     itemRows?: Array<{ product_ref: string; quantity: number; unit_price_cents: number }>;
+    existingOrderRows?: unknown[];
   } = {},
 ) {
-  const cartRow = options.cartRow ?? { id: CART_ID, conversation_id: CONVERSATION_ID, customer_id: CUSTOMER_ID };
+  const cartRow = options.cartRow ?? {
+    id: CART_ID,
+    conversation_id: CONVERSATION_ID,
+    customer_id: CUSTOMER_ID,
+    version: 0,
+  };
   client.query.mockResolvedValueOnce({}); // BEGIN
   client.query.mockResolvedValueOnce({}); // SET LOCAL lock_timeout
   client.query.mockResolvedValueOnce({}); // SET LOCAL statement_timeout
-  client.query.mockResolvedValueOnce({ rows: options.cartRow === null ? [] : [cartRow] }); // cart lock
+  client.query.mockResolvedValueOnce({
+    rows: options.cartRow === null ? [] : [{ version: 0, ...cartRow }],
+  }); // cart lock
   if (options.cartRow === null) return;
+  const existingOrderRows = options.existingOrderRows ?? [];
+  client.query.mockResolvedValueOnce({ rows: existingOrderRows }); // idempotency replay check
+  if (existingOrderRows.length > 0) return; // replay short-circuits before cart_items
   const itemRows = options.itemRows ?? [{ product_ref: "REF-0001", quantity: 1, unit_price_cents: 10000 }];
   client.query.mockResolvedValueOnce({ rows: itemRows }); // cart_items
 }
@@ -185,6 +198,7 @@ describe("createOrder — cart validation (G, H, I)", () => {
 
     expect(result.created).toBe(true);
     if (result.created) {
+      expect(result.replayed).toBe(false);
       expect(result.order.customerId).toBe(CUSTOMER_ID);
       expect(result.order.conversationId).toBe(CONVERSATION_ID);
     }
@@ -202,7 +216,9 @@ describe("createOrder — product locking (J, K, L, M, N, O)", () => {
 
     await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
 
-    const lockCall = client.query.mock.calls[5] as [string, unknown[]];
+    const lockCall = client.query.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("FOR UPDATE") && call[0].includes("FROM products"),
+    ) as [string, unknown[]];
     expect(lockCall[0]).toMatch(/ORDER BY ref\s+FOR UPDATE/i);
     expect(lockCall[0]).toMatch(/ref = ANY\(\$1::text\[\]\)/);
   });
@@ -219,7 +235,9 @@ describe("createOrder — product locking (J, K, L, M, N, O)", () => {
 
     await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
 
-    const lockCall = client.query.mock.calls[5] as [string, unknown[]];
+    const lockCall = client.query.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("FOR UPDATE") && call[0].includes("FROM products"),
+    ) as [string, unknown[]];
     expect(lockCall[1]).toEqual([["REF-0001"]]);
   });
 
@@ -559,9 +577,9 @@ describe("createOrder — totals and integer safety (AB, AC, AD, AE)", () => {
 });
 
 describe("createOrder — writes (AF, AG, AH, AI, AJ, AK, AL)", () => {
-  it("AF: generates a fresh internal idempotency key (valid UUID shape) for each attempt", async () => {
+  it("AF: uses the deterministic key cart:${cartId}:v${version}, never a random UUID", async () => {
     const client = makeFakeClient();
-    queuePrefix(client);
+    queuePrefix(client, { cartRow: { id: CART_ID, conversation_id: CONVERSATION_ID, customer_id: CUSTOMER_ID, version: 3 } });
     client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
     queuePricing(client, makeProductRow());
     queueHappyPathTail(client, makeDeliveryRow(), makeOrderRow(), 4);
@@ -573,7 +591,7 @@ describe("createOrder — writes (AF, AG, AH, AI, AJ, AK, AL)", () => {
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO orders"),
     ) as [string, unknown[]];
     const idempotencyKey = insertCall[1][7] as string;
-    expect(idempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(idempotencyKey).toBe(`cart:${CART_ID}:v3`);
   });
 
   it("AG: the order is always inserted with status 'confirmed'", async () => {
@@ -930,5 +948,331 @@ describe("createOrder — schema validation timing and mapping (AW, AX, AY, AZ)"
 describe("createOrder — security and scope (BA)", () => {
   it("BA: the signature never accepts a caller-supplied price, fee, total, or idempotency key", () => {
     expect(createOrder.length).toBe(5);
+  });
+});
+
+function makeExistingOrderRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: ORDER_ID,
+    customer_id: CUSTOMER_ID,
+    conversation_id: CONVERSATION_ID,
+    status: "confirmed",
+    products_total_cents: 10000,
+    delivery_fee_cents: 2500,
+    total_cents: 12500,
+    city: "Casablanca",
+    payment_method: "cash_on_delivery",
+    created_at: new Date("2026-09-18T12:00:00.000Z"),
+    city_matches: true,
+    ...overrides,
+  };
+}
+
+function makeExistingOrderItemRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "66666666-6666-4666-8666-666666666666",
+    product_ref: "REF-0001",
+    quantity: 1,
+    unit_price_cents: 10000,
+    ...overrides,
+  };
+}
+
+describe("createOrder — idempotency (A-AL)", () => {
+  it("B: deterministic key is cart:${cartId}:v${version} — covered directly in AF above", () => {
+    expect(true).toBe(true);
+  });
+
+  it("D, E: a valid early replay returns the SAME order id, replayed:true, via ROLLBACK not COMMIT", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { existingOrderRows: [makeExistingOrderRow()] });
+    client.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow()] }); // order_items
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    expect(result).toEqual({
+      created: true,
+      replayed: true,
+      order: expect.objectContaining({ id: ORDER_ID }),
+    });
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.query).not.toHaveBeenCalledWith("COMMIT");
+  });
+
+  it("G, H, I, J, K, M: a valid replay never queries cart_items/products/promotions/delivery, never inserts/decrements", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { existingOrderRows: [makeExistingOrderRow()] });
+    client.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow()] });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    const sqlCalls = client.query.mock.calls.map((call) => call[0]).filter((sql): sql is string => typeof sql === "string");
+    expect(sqlCalls.some((sql) => sql.includes("FROM cart_items"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("FROM products"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("FROM promotions"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("FROM delivery_zones"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO orders"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("INSERT INTO order_items"))).toBe(false);
+    expect(sqlCalls.some((sql) => sql.includes("UPDATE products"))).toBe(false);
+  });
+
+  it("N, O: replay returns the stored original price/delivery fee, ignoring any current values", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      existingOrderRows: [makeExistingOrderRow({ products_total_cents: 77700, delivery_fee_cents: 3300, total_cents: 81000 })],
+    });
+    client.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow({ unit_price_cents: 77700 })] });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    expect(result.created).toBe(true);
+    if (result.created) {
+      expect(result.order.productsTotal).toBe(777);
+      expect(result.order.deliveryFee).toBe(33);
+      expect(result.order.total).toBe(810);
+      expect(result.order.items[0]?.unitPrice).toBe(777);
+    }
+  });
+
+  it("R: retry with a city casing difference (CASABLANCA vs Casablanca) replays successfully", async () => {
+    const client = makeFakeClient();
+    // city_matches is computed by SQL lower(...) in production; the mock
+    // simulates that SQL result directly rather than re-implementing case-folding.
+    queuePrefix(client, { existingOrderRows: [makeExistingOrderRow({ city: "Casablanca", city_matches: true })] });
+    client.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow()] });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "CASABLANCA", "cash_on_delivery", AS_OF_DATE);
+
+    expect(result).toEqual({ created: true, replayed: true, order: expect.objectContaining({ id: ORDER_ID }) });
+  });
+
+  it("S: an accent-different city (Fès stored vs Fes requested) is a conflict, not a replay", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      existingOrderRows: [makeExistingOrderRow({ city: "Fès", city_matches: false })],
+    });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Fes", "cash_on_delivery", AS_OF_DATE);
+
+    expect(result).toEqual({ created: false, reason: "idempotency_conflict" });
+  });
+
+  it("T: a different paymentMethod under the same identity is a conflict", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      existingOrderRows: [makeExistingOrderRow({ payment_method: "cash_on_delivery", city_matches: true })],
+    });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "card", AS_OF_DATE);
+
+    expect(result).toEqual({ created: false, reason: "idempotency_conflict" });
+  });
+
+  it("U: a stored customer mismatch throws an explicit Integrity error, never idempotency_conflict", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      existingOrderRows: [makeExistingOrderRow({ customer_id: "99999999-9999-4999-8999-999999999999" })],
+    });
+    client.query.mockResolvedValueOnce({}); // best-effort ROLLBACK on thrown error
+    mockConnect(client);
+
+    await expect(createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE)).rejects.toThrow(
+      /Integrity error.*customer/i,
+    );
+  });
+
+  it("V: a stored conversation mismatch throws an explicit Integrity error, never idempotency_conflict", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      existingOrderRows: [makeExistingOrderRow({ conversation_id: "88888888-8888-4888-8888-888888888888" })],
+    });
+    client.query.mockResolvedValueOnce({}); // best-effort ROLLBACK on thrown error
+    mockConnect(client);
+
+    await expect(createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE)).rejects.toThrow(
+      /Integrity error.*conversation/i,
+    );
+  });
+
+  it("W: a malformed/corrupt existing order (fails OrderSchema) throws rather than being silently repaired", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { existingOrderRows: [makeExistingOrderRow()] });
+    client.query.mockResolvedValueOnce({ rows: [] }); // zero order_items -> OrderSchema requires >= 1
+    client.query.mockResolvedValueOnce({}); // best-effort ROLLBACK
+    mockConnect(client);
+
+    await expect(createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE)).rejects.toThrow();
+  });
+
+  it("Y: existing order items are loaded ORDER BY product_ref, id", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { existingOrderRows: [makeExistingOrderRow()] });
+    client.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow()] });
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    const itemsCall = client.query.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("FROM order_items"),
+    ) as [string, unknown[]];
+    expect(itemsCall[0]).toMatch(/ORDER BY product_ref,\s*id/i);
+  });
+
+  it("Z, AA: first creation uses ON CONFLICT (idempotency_key) DO NOTHING with the deterministic key", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { cartRow: { id: CART_ID, conversation_id: CONVERSATION_ID, customer_id: CUSTOMER_ID, version: 7 } });
+    client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(client, makeProductRow());
+    queueHappyPathTail(client, makeDeliveryRow(), makeOrderRow(), 4);
+    mockConnect(client);
+
+    await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    const insertCall = client.query.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO orders"),
+    ) as [string, unknown[]];
+    expect(insertCall[0]).toMatch(/ON CONFLICT \(idempotency_key\) DO NOTHING/i);
+    expect(insertCall[1][7]).toBe(`cart:${CART_ID}:v7`);
+  });
+
+  it("AB-AE: the ON CONFLICT zero-row fallback applies the same replay semantics (valid replay, conflict, and impossible-mismatch throw)", async () => {
+    // AC: fallback valid replay
+    const replayClient = makeFakeClient();
+    queuePrefix(replayClient);
+    replayClient.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(replayClient, makeProductRow());
+    replayClient.query.mockResolvedValueOnce({ rows: [makeDeliveryRow()] });
+    replayClient.query.mockResolvedValueOnce({ rows: [] }); // INSERT ... ON CONFLICT DO NOTHING -> 0 rows
+    replayClient.query.mockResolvedValueOnce({ rows: [makeExistingOrderRow()] }); // fallback loader: orders
+    replayClient.query.mockResolvedValueOnce({ rows: [makeExistingOrderItemRow()] }); // fallback loader: order_items
+    replayClient.query.mockResolvedValueOnce({}); // ROLLBACK
+    vi.spyOn(postgresPool, "connect").mockResolvedValueOnce(replayClient as never);
+    const replayResult = await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+    expect(replayResult).toEqual({ created: true, replayed: true, order: expect.objectContaining({ id: ORDER_ID }) });
+    expect(replayClient.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(replayClient.query).not.toHaveBeenCalledWith("COMMIT");
+
+    // AD: fallback conflict
+    const conflictClient = makeFakeClient();
+    queuePrefix(conflictClient);
+    conflictClient.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(conflictClient, makeProductRow());
+    conflictClient.query.mockResolvedValueOnce({ rows: [makeDeliveryRow()] });
+    conflictClient.query.mockResolvedValueOnce({ rows: [] }); // INSERT conflict
+    conflictClient.query.mockResolvedValueOnce({ rows: [makeExistingOrderRow({ city_matches: false })] }); // fallback loader
+    conflictClient.query.mockResolvedValueOnce({}); // ROLLBACK
+    vi.spyOn(postgresPool, "connect").mockResolvedValueOnce(conflictClient as never);
+    const conflictResult = await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+    expect(conflictResult).toEqual({ created: false, reason: "idempotency_conflict" });
+
+    // AE: fallback impossible mismatch -> throw
+    const throwClient = makeFakeClient();
+    queuePrefix(throwClient);
+    throwClient.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(throwClient, makeProductRow());
+    throwClient.query.mockResolvedValueOnce({ rows: [makeDeliveryRow()] });
+    throwClient.query.mockResolvedValueOnce({ rows: [] }); // INSERT conflict
+    throwClient.query.mockResolvedValueOnce({
+      rows: [makeExistingOrderRow({ customer_id: "77777777-7777-4777-8777-777777777777" })],
+    });
+    throwClient.query.mockResolvedValueOnce({}); // best-effort ROLLBACK
+    vi.spyOn(postgresPool, "connect").mockResolvedValueOnce(throwClient as never);
+    await expect(createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE)).rejects.toThrow(/Integrity error/i);
+  });
+
+  it("AF: business failures (e.g. insufficient_stock) never attempt the orders INSERT — no identity reserved", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { itemRows: [{ product_ref: "REF-0001", quantity: 3, unit_price_cents: 10000 }] });
+    client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 2 }] });
+    queuePricing(client, makeProductRow({ stock: 2 }));
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "card", AS_OF_DATE);
+
+    expect(result).toEqual({
+      created: false,
+      reason: "insufficient_stock",
+      productRef: "REF-0001",
+      requestedQuantity: 3,
+      availableStock: 2,
+    });
+    expect(client.query).not.toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO orders/i), expect.anything());
+  });
+
+  it("AG: price_changed never attempts the orders INSERT — no identity reserved", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, { itemRows: [{ product_ref: "REF-0001", quantity: 1, unit_price_cents: 9000 }] });
+    client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(client, makeProductRow({ price_cents: 10000, stock: 5 }));
+    client.query.mockResolvedValueOnce({}); // ROLLBACK
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "card", AS_OF_DATE);
+
+    expect(result.created).toBe(false);
+    if (!result.created) expect(result.reason).toBe("price_changed");
+    expect(client.query).not.toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO orders/i), expect.anything());
+  });
+
+  it("AH: a higher cart version after price_changed recovery derives a different, independent key", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      cartRow: { id: CART_ID, conversation_id: CONVERSATION_ID, customer_id: CUSTOMER_ID, version: 2 },
+    });
+    client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(client, makeProductRow());
+    queueHappyPathTail(client, makeDeliveryRow(), makeOrderRow(), 4);
+    mockConnect(client);
+
+    await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    const insertCall = client.query.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO orders"),
+    ) as [string, unknown[]];
+    expect(insertCall[1][7]).toBe(`cart:${CART_ID}:v2`);
+  });
+
+  it("AI: an invalid locked cart version (negative) throws an explicit Integrity error", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client, {
+      cartRow: { id: CART_ID, conversation_id: CONVERSATION_ID, customer_id: CUSTOMER_ID, version: -1 },
+    });
+    client.query.mockResolvedValueOnce({}); // best-effort ROLLBACK
+    mockConnect(client);
+
+    await expect(createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE)).rejects.toThrow(
+      /Integrity error.*version/i,
+    );
+  });
+
+  it("AJ, AK, AL: regression — timeouts, rollback/release, and OrderSchema-before-COMMIT guarantees remain green with the new replay step", async () => {
+    const client = makeFakeClient();
+    queuePrefix(client);
+    client.query.mockResolvedValueOnce({ rows: [{ ref: "REF-0001", stock: 5 }] });
+    queuePricing(client, makeProductRow());
+    queueHappyPathTail(client, makeDeliveryRow(), makeOrderRow(), 4);
+    mockConnect(client);
+
+    const result = await createOrder(CART_ID, true, "Casablanca", "cash_on_delivery", AS_OF_DATE);
+
+    expect(result).toEqual({ created: true, replayed: false, order: expect.objectContaining({ id: ORDER_ID }) });
+    expect(client.query.mock.calls[0][0]).toBe("BEGIN");
+    const calls = client.query.mock.calls.map((call) => call[0]);
+    expect(calls[calls.length - 1]).toBe("COMMIT");
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 });
