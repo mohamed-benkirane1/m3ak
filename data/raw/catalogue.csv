@@ -1,0 +1,81 @@
+ref,modele,famille,genre,couleur,taille,matiere,saison,prix_mad,stock,delai_reassort_jours,code_barre,poids_g
+REF-0001,Foulard bordeaux,Foulard,femme,bordeaux,unique,cuir,toute saison,100,2,,6119052578161,1127
+REF-0002,Sac à main noir,Sac à main,femme,noir,unique,denim,été,1320,14,,6115310250915,911
+REF-0003,Ceinture bordeaux,Ceinture,mixte,bordeaux,85,soie,toute saison,320,2,,6116556514427,667
+REF-0004,Ceinture bordeaux,Ceinture,mixte,bordeaux,90,soie,mi-saison,320,3,,6119045149918,183
+REF-0005,Ceinture bordeaux,Ceinture,mixte,bordeaux,95,soie,hiver,320,2,,6112480365798,1358
+REF-0006,Foulard bleu nuit,Foulard,femme,bleu nuit,unique,coton,été,190,22,,6112678919978,1314
+REF-0007,Sac à main gris perle,Sac à main,femme,gris perle,unique,coton,mi-saison,600,6,,6119883890515,1270
+REF-0008,Veste blanc cassé,Veste,mixte,blanc cassé,S,polyester,toute saison,1190,14,,6112030943515,672
+REF-0009,Veste blanc cassé,Veste,mixte,blanc cassé,M,polyester,été,1190,4,,6116240366708,1360
+REF-0010,Veste blanc cassé,Veste,mixte,blanc cassé,L,polyester,toute saison,1190,3,,6119662846684,737
+REF-0011,Veste blanc cassé,Veste,mixte,blanc cassé,XL,polyester,mi-saison,1190,6,,6114297936377,1212
+REF-0012,Blouson vert olive,Blouson,homme,vert olive,S,soie,mi-saison,700,1,,6114873999482,979
+REF-0013,Blouson vert olive,Blouson,homme,vert olive,M,soie,hiver,700,2,,6117861177739,1176
+REF-0014,Blouson vert olive,Blouson,homme,vert olive,L,soie,été,700,4,,6116349358198,675
+REF-0015,Sac à main blanc cassé,Sac à main,femme,blanc cassé,unique,cuir,toute saison,820,0,,6114996907540,1337
+REF-0016,Ceinture vert olive,Ceinture,mixte,vert olive,85,coton,été,200,14,,6114967474112,1030
+REF-0017,Ceinture vert olive,Ceinture,mixte,vert olive,90,coton,mi-saison,200,0,7,6112452614616,1074
+REF-0018,Ceinture vert olive,Ceinture,mixte,vert olive,95,coton,été,200,1,,6114451368189,443
+REF-0019,Caftan beige,Caftan,femme,beige,S,lin,mi-saison,1580,0,,6119946585453,1108
+REF-0020,Caftan beige,Caftan,femme,beige,M,lin,été,1580,0,7,6114829856167,488
+REF-0021,Caftan beige,Caftan,femme,beige,L,lin,hiver,1580,4,,6114583901621,975
+REF-0022,Blouson bleu nuit,Blouson,homme,bleu nuit,S,coton,toute saison,730,9,,6114307896280,243
+REF-0023,Blouson bleu nuit,Blouson,homme,bleu nuit,M,coton,hiver,730,0,21,6113456232336,1141
+REF-0024,Blouson bleu nuit,Blouson,homme,bleu nuit,L,coton,mi-saison,730,6,,6111563812145,1303
+REF-0025,Sac à main blanc cassé,Sac à main,femme,blanc cassé,unique,coton,toute saison,840,22,,6118895308931,1303
+REF-0026,Pantalon camel,Pantalon,mixte,camel,38,viscose,mi-saison,550,1,,6118483036333,262
+REF-0027,Pantalon camel,Pantalon,mixte,camel,40,viscose,été,550,0,14,6118342691726,708
+REF-0028,Pantalon camel,Pantalon,mixte,camel,42,viscose,mi-saison,550,4,,6113016388526,966
+REF-0029,Pantalon camel,Pantalon,mixte,camel,44,viscose,été,550,1,,6111881036528,547
+REF-0030,Robe terracotta,Robe,femme,terracotta,S,denim,toute saison,740,0,,6116240531743,136
+REF-0031,Robe terracotta,Robe,femme,terracotta,M,denim,mi-saison,740,3,,6119951754869,246
+REF-0032,Robe terracotta,Robe,femme,terracotta,L,denim,mi-saison,740,6,,6115947063120,708
+REF-0033,Robe terracotta,Robe,femme,terracotta,XL,denim,mi-saison,740,0,7,6117107133696,271
+REF-0034,Sac à main vert olive,Sac à main,femme,vert olive,unique,viscose,hiver,840,4,,6112615240953,650
+REF-0035,Veste beige,Veste,mixte,beige,S,lin,mi-saison,1140,22,,6115832105534,1119
+REF-0036,Veste beige,Veste,mixte,beige,M,lin,toute saison,1140,14,,6113440442333,924
+REF-0037,Veste beige,Veste,mixte,beige,L,lin,toute saison,1140,4,,6113378311955,894
+REF-0038,Veste beige,Veste,mixte,beige,XL,lin,mi-saison,1140,1,,6116697833567,1377
+REF-0039,Ceinture blanc cassé,Ceinture,mixte,blanc cassé,85,cuir,mi-saison,320,4,,6113014158305,295
+REF-0040,Ceinture blanc cassé,Ceinture,mixte,blanc cassé,90,cuir,été,320,1,,6114956927127,971
+REF-0041,Ceinture blanc cassé,Ceinture,mixte,blanc cassé,95,cuir,toute saison,320,3,,6116872199189,1151
+REF-0042,Chemise vert olive,Chemise,mixte,vert olive,S,soie,toute saison,310,1,,6116547016128,280
+REF-0043,Chemise vert olive,Chemise,mixte,vert olive,M,soie,toute saison,310,22,,6114865351089,1280
+REF-0044,Chemise vert olive,Chemise,mixte,vert olive,L,soie,été,310,9,,6116815145558,867
+REF-0045,Chemise vert olive,Chemise,mixte,vert olive,XL,soie,mi-saison,310,0,21,6116055727518,356
+REF-0046,Robe vert olive,Robe,femme,vert olive,S,denim,hiver,450,4,,6117218639517,1301
+REF-0047,Robe vert olive,Robe,femme,vert olive,M,denim,hiver,450,0,,6117614613195,517
+REF-0048,Robe vert olive,Robe,femme,vert olive,L,denim,toute saison,450,22,,6118901851011,133
+REF-0049,Robe vert olive,Robe,femme,vert olive,XL,denim,toute saison,450,22,,6114273710204,989
+REF-0050,Caftan bordeaux,Caftan,femme,bordeaux,S,cuir,mi-saison,1580,2,,6115902506201,499
+REF-0051,Caftan bordeaux,Caftan,femme,bordeaux,M,cuir,hiver,1580,6,,6113708539253,1277
+REF-0052,Caftan bordeaux,Caftan,femme,bordeaux,L,cuir,été,1580,6,,6115287169293,1235
+REF-0053,Foulard bleu nuit,Foulard,femme,bleu nuit,unique,viscose,mi-saison,90,4,,6119837490860,772
+REF-0054,Foulard bleu nuit,Foulard,femme,bleu nuit,unique,soie,été,180,0,21,6114235443979,943
+REF-0055,Sac à main terracotta,Sac à main,femme,terracotta,unique,soie,été,760,0,,6118802944799,141
+REF-0056,Chaussures terracotta,Chaussures,mixte,terracotta,38,denim,hiver,960,4,,6118067781348,767
+REF-0057,Chaussures terracotta,Chaussures,mixte,terracotta,39,denim,toute saison,960,22,,6111940999024,576
+REF-0058,Chaussures terracotta,Chaussures,mixte,terracotta,40,denim,toute saison,960,0,7,6113587636643,677
+REF-0059,Chaussures terracotta,Chaussures,mixte,terracotta,41,denim,toute saison,960,1,,6117578893111,325
+REF-0060,Chaussures terracotta,Chaussures,mixte,terracotta,42,denim,hiver,960,22,,6113234139421,706
+REF-0061,Ceinture ivoire,Ceinture,mixte,ivoire,85,viscose,mi-saison,300,14,,6119506660429,1258
+REF-0062,Ceinture ivoire,Ceinture,mixte,ivoire,90,viscose,hiver,300,6,,6112573848940,631
+REF-0063,Ceinture ivoire,Ceinture,mixte,ivoire,95,viscose,toute saison,300,9,,6117694130851,1081
+REF-0064,Caftan noir,Caftan,femme,noir,S,denim,été,1030,9,,6114408591484,1340
+REF-0065,Caftan noir,Caftan,femme,noir,M,denim,hiver,1030,9,,6112920889297,1321
+REF-0066,Caftan noir,Caftan,femme,noir,L,denim,été,1030,0,7,6114711134667,801
+REF-0067,Chaussures camel,Chaussures,mixte,camel,38,polyester,été,680,22,,6116065470897,346
+REF-0068,Chaussures camel,Chaussures,mixte,camel,39,polyester,mi-saison,680,14,,6112992773034,187
+REF-0069,Chaussures camel,Chaussures,mixte,camel,40,polyester,mi-saison,680,6,,6115867218299,359
+REF-0070,Chaussures camel,Chaussures,mixte,camel,41,polyester,été,680,6,,6117367071335,155
+REF-0071,Chaussures camel,Chaussures,mixte,camel,42,polyester,été,680,9,,6115120896244,257
+REF-0072,Sac à main noir,Sac à main,femme,noir,unique,polyester,été,1090,9,,6118324129329,544
+REF-0073,Pantalon camel,Pantalon,mixte,camel,38,cuir,mi-saison,300,3,,6116783273086,1373
+REF-0074,Pantalon camel,Pantalon,mixte,camel,40,cuir,toute saison,300,9,,6117713360247,233
+REF-0075,Pantalon camel,Pantalon,mixte,camel,42,cuir,mi-saison,300,9,,6119088864691,799
+REF-0076,Pantalon camel,Pantalon,mixte,camel,44,cuir,toute saison,300,14,,6118213946091,565
+REF-0077,Caftan terracotta,Caftan,femme,terracotta,S,denim,hiver,1940,2,,6114946736371,1117
+REF-0078,Caftan terracotta,Caftan,femme,terracotta,M,denim,hiver,1940,0,7,6113652443107,1109
+REF-0079,Caftan terracotta,Caftan,femme,terracotta,L,denim,hiver,1940,6,,6114621428864,148
+REF-0080,Ceinture gris perle,Ceinture,mixte,gris perle,85,denim,hiver,310,9,,6115183539464,764

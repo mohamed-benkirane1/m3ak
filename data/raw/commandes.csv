@@ -1,0 +1,321 @@
+commande_id,client_id,date,canal,statut,total_articles_mad,frais_livraison_mad,total_mad,ville_livraison,paiement
+CMD-00001,CLI-0023,2026-01-06,whatsapp,livrée,640,45,685,Tanger,à la livraison
+CMD-00002,CLI-0067,2026-07-21,whatsapp,en préparation,1190,40,1230,Tanger,à la livraison
+CMD-00003,CLI-0056,2026-03-11,whatsapp,en préparation,840,35,875,Marrakech,à la livraison
+CMD-00004,CLI-0116,2026-08-14,whatsapp,livrée,300,45,345,Mohammedia,à la livraison
+CMD-00005,CLI-0026,2026-01-19,instagram,livrée,310,30,340,Agadir,à la livraison
+CMD-00006,CLI-0079,2026-05-09,whatsapp,livrée,1260,25,1285,Oujda,à la livraison
+CMD-00007,CLI-0060,2026-03-12,boutique,livrée,300,25,325,Oujda,carte
+CMD-00008,CLI-0086,2026-07-24,whatsapp,livrée,1890,40,1930,Salé,carte
+CMD-00009,CLI-0036,2026-08-05,whatsapp,annulée,1140,30,1170,Fès,à la livraison
+CMD-00010,CLI-0041,2026-08-11,boutique,en préparation,680,35,715,Marrakech,à la livraison
+CMD-00011,CLI-0101,2026-08-05,instagram,livrée,310,35,345,Tétouan,à la livraison
+CMD-00012,CLI-0019,2026-03-09,boutique,livrée,700,35,735,Fès,carte
+CMD-00013,CLI-0035,2026-01-18,instagram,livrée,700,45,745,Rabat,virement
+CMD-00014,CLI-0111,2026-02-03,whatsapp,en préparation,1340,35,1375,Kénitra,carte
+CMD-00015,CLI-0074,2026-02-11,whatsapp,livrée,2740,40,2780,Agadir,à la livraison
+CMD-00016,CLI-0072,2026-01-16,whatsapp,livrée,550,45,595,Salé,virement
+CMD-00017,CLI-0095,2026-06-03,whatsapp,panier abandonné,320,40,360,Tétouan,virement
+CMD-00018,CLI-0119,2026-01-14,whatsapp,annulée,1250,30,1280,Salé,carte
+CMD-00019,CLI-0057,2026-01-18,whatsapp,livrée,310,30,340,Oujda,virement
+CMD-00020,CLI-0058,2026-08-22,instagram,panier abandonné,640,40,680,Agadir,à la livraison
+CMD-00021,CLI-0069,2026-07-02,whatsapp,livrée,320,25,345,Tétouan,à la livraison
+CMD-00022,CLI-0095,2026-04-25,whatsapp,livrée,3200,45,3245,Tétouan,à la livraison
+CMD-00023,CLI-0024,2026-03-20,whatsapp,annulée,2320,25,2345,Oujda,à la livraison
+CMD-00024,CLI-0064,2026-07-16,instagram,livrée,680,35,715,Tétouan,à la livraison
+CMD-00025,CLI-0055,2026-02-16,whatsapp,livrée,100,35,135,Meknès,virement
+CMD-00026,CLI-0072,2026-05-20,whatsapp,livrée,680,40,720,Salé,virement
+CMD-00027,CLI-0107,2026-08-22,whatsapp,annulée,2100,35,2135,Salé,carte
+CMD-00028,CLI-0096,2026-08-02,whatsapp,en préparation,1190,25,1215,Casablanca,carte
+CMD-00029,CLI-0089,2026-08-07,whatsapp,livrée,300,45,345,Meknès,à la livraison
+CMD-00030,CLI-0084,2026-04-01,boutique,livrée,1410,35,1445,Fès,virement
+CMD-00031,CLI-0107,2026-01-12,whatsapp,annulée,700,25,725,Salé,virement
+CMD-00032,CLI-0102,2026-04-12,whatsapp,livrée,1140,35,1175,Fès,carte
+CMD-00033,CLI-0073,2026-05-19,instagram,livrée,2280,45,2325,Meknès,virement
+CMD-00034,CLI-0004,2026-04-13,whatsapp,livrée,1580,40,1620,Oujda,virement
+CMD-00035,CLI-0017,2026-04-02,boutique,livrée,700,25,725,Fès,à la livraison
+CMD-00036,CLI-0090,2026-02-05,instagram,panier abandonné,450,30,480,Marrakech,à la livraison
+CMD-00037,CLI-0076,2026-03-16,whatsapp,livrée,630,30,660,Oujda,carte
+CMD-00038,CLI-0039,2026-06-06,whatsapp,livrée,850,25,875,Tétouan,à la livraison
+CMD-00039,CLI-0107,2026-02-07,whatsapp,annulée,1690,35,1725,Salé,carte
+CMD-00040,CLI-0087,2026-08-01,whatsapp,livrée,730,45,775,Salé,carte
+CMD-00041,CLI-0046,2026-05-15,instagram,livrée,700,35,735,Tétouan,carte
+CMD-00042,CLI-0006,2026-07-13,whatsapp,livrée,1590,40,1630,Rabat,carte
+CMD-00043,CLI-0106,2026-02-23,whatsapp,livrée,1140,40,1180,Mohammedia,virement
+CMD-00044,CLI-0002,2026-03-22,whatsapp,livrée,740,40,780,Agadir,virement
+CMD-00045,CLI-0024,2026-07-02,boutique,livrée,300,40,340,Oujda,à la livraison
+CMD-00046,CLI-0091,2026-04-02,whatsapp,livrée,2200,45,2245,Tétouan,virement
+CMD-00047,CLI-0041,2026-01-03,whatsapp,panier abandonné,730,35,765,Marrakech,à la livraison
+CMD-00048,CLI-0064,2026-03-13,whatsapp,livrée,100,40,140,Tétouan,virement
+CMD-00049,CLI-0035,2026-08-19,boutique,annulée,2380,25,2405,Rabat,carte
+CMD-00050,CLI-0044,2026-05-10,whatsapp,livrée,840,40,880,Agadir,carte
+CMD-00051,CLI-0107,2026-05-14,boutique,livrée,1090,30,1120,Salé,à la livraison
+CMD-00052,CLI-0044,2026-07-20,whatsapp,livrée,2190,25,2215,Agadir,virement
+CMD-00053,CLI-0081,2026-01-01,whatsapp,livrée,1140,40,1180,Meknès,virement
+CMD-00054,CLI-0006,2026-07-18,whatsapp,livrée,510,45,555,Rabat,carte
+CMD-00055,CLI-0083,2026-03-11,whatsapp,livrée,1710,25,1735,Salé,carte
+CMD-00056,CLI-0033,2026-01-22,boutique,livrée,1220,30,1250,Kénitra,carte
+CMD-00057,CLI-0051,2026-01-23,whatsapp,livrée,960,45,1005,Marrakech,à la livraison
+CMD-00058,CLI-0095,2026-01-21,whatsapp,en préparation,1940,35,1975,Tétouan,à la livraison
+CMD-00059,CLI-0106,2026-02-06,boutique,livrée,320,30,350,Mohammedia,à la livraison
+CMD-00060,CLI-0106,2026-04-19,instagram,livrée,1190,25,1215,Mohammedia,carte
+CMD-00061,CLI-0088,2026-06-02,whatsapp,livrée,200,35,235,Oujda,à la livraison
+CMD-00062,CLI-0015,2026-08-04,whatsapp,en préparation,1460,40,1500,Mohammedia,virement
+CMD-00063,CLI-0018,2026-07-26,boutique,livrée,730,30,760,Mohammedia,à la livraison
+CMD-00064,CLI-0025,2026-08-17,instagram,livrée,700,35,735,Rabat,à la livraison
+CMD-00065,CLI-0112,2026-05-26,whatsapp,livrée,1710,45,1755,Marrakech,à la livraison
+CMD-00066,CLI-0062,2026-07-12,whatsapp,livrée,550,45,595,Tanger,carte
+CMD-00067,CLI-0060,2026-08-11,whatsapp,livrée,680,45,725,Oujda,à la livraison
+CMD-00068,CLI-0021,2026-04-09,whatsapp,panier abandonné,310,35,345,Marrakech,virement
+CMD-00069,CLI-0050,2026-05-15,whatsapp,livrée,980,35,1015,Salé,carte
+CMD-00070,CLI-0010,2026-01-01,boutique,livrée,600,35,635,Salé,à la livraison
+CMD-00071,CLI-0112,2026-04-18,whatsapp,livrée,2280,30,2310,Marrakech,à la livraison
+CMD-00072,CLI-0115,2026-08-27,whatsapp,livrée,680,45,725,Agadir,à la livraison
+CMD-00073,CLI-0067,2026-05-14,instagram,livrée,1940,40,1980,Tanger,virement
+CMD-00074,CLI-0028,2026-04-08,whatsapp,en préparation,680,25,705,Salé,virement
+CMD-00075,CLI-0080,2026-04-07,instagram,livrée,730,25,755,Tétouan,à la livraison
+CMD-00076,CLI-0113,2026-07-23,boutique,livrée,1190,30,1220,Salé,à la livraison
+CMD-00077,CLI-0076,2026-03-08,whatsapp,panier abandonné,1820,30,1850,Oujda,virement
+CMD-00078,CLI-0110,2026-02-17,boutique,en préparation,1680,45,1725,Fès,carte
+CMD-00079,CLI-0066,2026-01-03,whatsapp,livrée,1190,40,1230,Agadir,à la livraison
+CMD-00080,CLI-0012,2026-01-06,whatsapp,annulée,700,30,730,Oujda,carte
+CMD-00081,CLI-0106,2026-05-08,whatsapp,annulée,2130,25,2155,Mohammedia,carte
+CMD-00082,CLI-0067,2026-08-19,whatsapp,livrée,300,40,340,Tanger,à la livraison
+CMD-00083,CLI-0018,2026-03-24,whatsapp,livrée,2860,30,2890,Mohammedia,virement
+CMD-00084,CLI-0090,2026-02-18,whatsapp,livrée,320,35,355,Marrakech,à la livraison
+CMD-00085,CLI-0091,2026-03-01,whatsapp,en préparation,640,45,685,Tétouan,virement
+CMD-00086,CLI-0120,2026-07-17,whatsapp,annulée,1650,35,1685,Tanger,à la livraison
+CMD-00087,CLI-0074,2026-05-10,whatsapp,annulée,1400,40,1440,Agadir,carte
+CMD-00088,CLI-0020,2026-05-16,boutique,panier abandonné,320,35,355,Meknès,à la livraison
+CMD-00089,CLI-0090,2026-02-27,whatsapp,livrée,1300,40,1340,Marrakech,virement
+CMD-00090,CLI-0083,2026-08-18,whatsapp,livrée,1460,30,1490,Salé,virement
+CMD-00091,CLI-0037,2026-06-08,instagram,livrée,1960,40,2000,Fès,à la livraison
+CMD-00092,CLI-0107,2026-06-10,whatsapp,livrée,960,25,985,Salé,virement
+CMD-00093,CLI-0092,2026-01-06,whatsapp,livrée,310,25,335,Tanger,virement
+CMD-00094,CLI-0089,2026-04-26,instagram,annulée,310,40,350,Meknès,virement
+CMD-00095,CLI-0062,2026-06-04,whatsapp,livrée,300,35,335,Tanger,carte
+CMD-00096,CLI-0098,2026-05-15,whatsapp,livrée,700,35,735,Fès,virement
+CMD-00097,CLI-0088,2026-06-19,boutique,livrée,960,35,995,Oujda,à la livraison
+CMD-00098,CLI-0118,2026-03-07,boutique,livrée,2040,25,2065,Meknès,à la livraison
+CMD-00099,CLI-0057,2026-05-24,instagram,livrée,1820,30,1850,Oujda,à la livraison
+CMD-00100,CLI-0096,2026-05-17,instagram,en préparation,90,25,115,Casablanca,virement
+CMD-00101,CLI-0112,2026-08-13,whatsapp,livrée,1000,35,1035,Marrakech,carte
+CMD-00102,CLI-0036,2026-08-22,whatsapp,livrée,840,40,880,Fès,à la livraison
+CMD-00103,CLI-0041,2026-04-12,boutique,panier abandonné,550,35,585,Marrakech,carte
+CMD-00104,CLI-0016,2026-04-09,boutique,livrée,300,35,335,Marrakech,à la livraison
+CMD-00105,CLI-0104,2026-02-10,whatsapp,livrée,700,25,725,Salé,virement
+CMD-00106,CLI-0073,2026-04-06,instagram,livrée,1140,30,1170,Meknès,carte
+CMD-00107,CLI-0077,2026-07-14,whatsapp,annulée,2250,25,2275,Tétouan,carte
+CMD-00108,CLI-0020,2026-01-09,whatsapp,annulée,2200,30,2230,Meknès,virement
+CMD-00109,CLI-0055,2026-02-23,instagram,en préparation,550,35,585,Meknès,virement
+CMD-00110,CLI-0090,2026-07-07,instagram,livrée,1580,30,1610,Marrakech,à la livraison
+CMD-00111,CLI-0033,2026-03-17,whatsapp,livrée,960,30,990,Kénitra,à la livraison
+CMD-00112,CLI-0044,2026-05-22,whatsapp,livrée,320,35,355,Agadir,carte
+CMD-00113,CLI-0110,2026-05-01,instagram,livrée,740,35,775,Fès,à la livraison
+CMD-00114,CLI-0094,2026-06-05,whatsapp,livrée,960,30,990,Marrakech,virement
+CMD-00115,CLI-0076,2026-08-20,whatsapp,livrée,1320,45,1365,Oujda,carte
+CMD-00116,CLI-0040,2026-03-03,whatsapp,livrée,2030,25,2055,Rabat,carte
+CMD-00117,CLI-0065,2026-05-04,whatsapp,livrée,450,40,490,Marrakech,virement
+CMD-00118,CLI-0082,2026-07-17,instagram,livrée,300,35,335,Tanger,à la livraison
+CMD-00119,CLI-0002,2026-03-24,whatsapp,annulée,320,25,345,Agadir,à la livraison
+CMD-00120,CLI-0120,2026-02-14,whatsapp,annulée,550,25,575,Tanger,carte
+CMD-00121,CLI-0028,2026-08-13,whatsapp,retournée,3670,40,3710,Salé,à la livraison
+CMD-00122,CLI-0105,2026-01-20,whatsapp,livrée,1140,25,1165,Marrakech,virement
+CMD-00123,CLI-0088,2026-06-06,whatsapp,livrée,550,25,575,Oujda,virement
+CMD-00124,CLI-0099,2026-08-24,whatsapp,livrée,1320,45,1365,Casablanca,à la livraison
+CMD-00125,CLI-0086,2026-06-22,instagram,livrée,3560,30,3590,Salé,à la livraison
+CMD-00126,CLI-0024,2026-03-01,whatsapp,annulée,2380,35,2415,Oujda,à la livraison
+CMD-00127,CLI-0044,2026-05-19,instagram,retournée,1040,45,1085,Agadir,à la livraison
+CMD-00128,CLI-0040,2026-06-14,instagram,livrée,960,25,985,Rabat,à la livraison
+CMD-00129,CLI-0066,2026-08-20,whatsapp,livrée,310,30,340,Agadir,à la livraison
+CMD-00130,CLI-0086,2026-02-16,whatsapp,livrée,960,25,985,Salé,à la livraison
+CMD-00131,CLI-0090,2026-05-14,whatsapp,livrée,190,25,215,Marrakech,à la livraison
+CMD-00132,CLI-0108,2026-03-08,instagram,annulée,1000,35,1035,Casablanca,à la livraison
+CMD-00133,CLI-0073,2026-02-02,whatsapp,livrée,300,45,345,Meknès,à la livraison
+CMD-00134,CLI-0024,2026-05-10,whatsapp,livrée,1430,40,1470,Oujda,à la livraison
+CMD-00135,CLI-0079,2026-05-21,boutique,livrée,320,45,365,Oujda,carte
+CMD-00136,CLI-0005,2026-02-17,instagram,livrée,920,35,955,Agadir,carte
+CMD-00137,CLI-0007,2026-07-08,whatsapp,panier abandonné,310,35,345,Meknès,à la livraison
+CMD-00138,CLI-0067,2026-05-25,instagram,en préparation,1190,35,1225,Tanger,virement
+CMD-00139,CLI-0109,2026-01-18,whatsapp,livrée,320,40,360,Marrakech,virement
+CMD-00140,CLI-0016,2026-05-22,whatsapp,livrée,320,35,355,Marrakech,à la livraison
+CMD-00141,CLI-0034,2026-02-09,boutique,panier abandonné,320,40,360,Agadir,carte
+CMD-00142,CLI-0067,2026-04-22,whatsapp,annulée,960,45,1005,Tanger,carte
+CMD-00143,CLI-0051,2026-05-14,whatsapp,panier abandonné,300,30,330,Marrakech,virement
+CMD-00144,CLI-0059,2026-03-14,whatsapp,livrée,740,45,785,Mohammedia,à la livraison
+CMD-00145,CLI-0065,2026-02-07,whatsapp,retournée,1280,30,1310,Marrakech,virement
+CMD-00146,CLI-0087,2026-08-09,boutique,livrée,3580,25,3605,Salé,virement
+CMD-00147,CLI-0112,2026-05-12,whatsapp,livrée,2330,30,2360,Marrakech,virement
+CMD-00148,CLI-0005,2026-03-13,whatsapp,livrée,3020,40,3060,Agadir,à la livraison
+CMD-00149,CLI-0018,2026-01-06,whatsapp,livrée,1510,45,1555,Mohammedia,à la livraison
+CMD-00150,CLI-0085,2026-04-24,whatsapp,annulée,320,45,365,Meknès,carte
+CMD-00151,CLI-0019,2026-03-09,whatsapp,en préparation,700,40,740,Fès,à la livraison
+CMD-00152,CLI-0001,2026-01-16,whatsapp,livrée,2260,25,2285,Tanger,à la livraison
+CMD-00153,CLI-0105,2026-04-05,instagram,annulée,1190,35,1225,Marrakech,à la livraison
+CMD-00154,CLI-0100,2026-03-16,whatsapp,livrée,960,40,1000,Fès,à la livraison
+CMD-00155,CLI-0040,2026-01-10,whatsapp,livrée,310,40,350,Rabat,carte
+CMD-00156,CLI-0015,2026-07-01,whatsapp,livrée,2410,35,2445,Mohammedia,virement
+CMD-00157,CLI-0014,2026-08-25,whatsapp,retournée,1190,30,1220,Tanger,carte
+CMD-00158,CLI-0077,2026-08-07,whatsapp,livrée,640,35,675,Tétouan,à la livraison
+CMD-00159,CLI-0023,2026-02-18,whatsapp,livrée,700,40,740,Tanger,à la livraison
+CMD-00160,CLI-0055,2026-04-15,instagram,livrée,620,45,665,Meknès,à la livraison
+CMD-00161,CLI-0120,2026-02-20,whatsapp,livrée,680,30,710,Tanger,à la livraison
+CMD-00162,CLI-0091,2026-06-16,whatsapp,livrée,200,40,240,Tétouan,carte
+CMD-00163,CLI-0084,2026-08-13,instagram,livrée,960,40,1000,Fès,carte
+CMD-00164,CLI-0032,2026-04-11,instagram,panier abandonné,1970,30,2000,Salé,à la livraison
+CMD-00165,CLI-0094,2026-08-08,whatsapp,livrée,200,25,225,Marrakech,à la livraison
+CMD-00166,CLI-0106,2026-08-02,boutique,annulée,1140,30,1170,Mohammedia,carte
+CMD-00167,CLI-0098,2026-03-09,boutique,livrée,200,40,240,Fès,à la livraison
+CMD-00168,CLI-0070,2026-06-08,whatsapp,livrée,1140,25,1165,Meknès,à la livraison
+CMD-00169,CLI-0060,2026-07-22,whatsapp,annulée,320,30,350,Oujda,carte
+CMD-00170,CLI-0007,2026-06-14,whatsapp,annulée,2720,25,2745,Meknès,carte
+CMD-00171,CLI-0113,2026-07-14,whatsapp,livrée,320,35,355,Salé,à la livraison
+CMD-00172,CLI-0116,2026-02-14,whatsapp,en préparation,2530,35,2565,Mohammedia,à la livraison
+CMD-00173,CLI-0086,2026-01-13,boutique,annulée,550,45,595,Salé,carte
+CMD-00174,CLI-0014,2026-03-13,whatsapp,annulée,2650,40,2690,Tanger,à la livraison
+CMD-00175,CLI-0065,2026-01-22,whatsapp,livrée,300,30,330,Marrakech,à la livraison
+CMD-00176,CLI-0104,2026-07-16,whatsapp,panier abandonné,550,40,590,Salé,carte
+CMD-00177,CLI-0094,2026-08-13,whatsapp,en préparation,740,35,775,Marrakech,à la livraison
+CMD-00178,CLI-0020,2026-08-20,whatsapp,livrée,1270,45,1315,Meknès,virement
+CMD-00179,CLI-0072,2026-07-25,instagram,livrée,640,35,675,Salé,à la livraison
+CMD-00180,CLI-0093,2026-01-02,whatsapp,en préparation,1580,45,1625,Agadir,virement
+CMD-00181,CLI-0078,2026-08-23,whatsapp,livrée,640,30,670,Kénitra,à la livraison
+CMD-00182,CLI-0062,2026-04-14,whatsapp,annulée,300,40,340,Tanger,à la livraison
+CMD-00183,CLI-0002,2026-05-12,instagram,livrée,320,35,355,Agadir,virement
+CMD-00184,CLI-0026,2026-03-16,whatsapp,livrée,1940,40,1980,Agadir,à la livraison
+CMD-00185,CLI-0070,2026-06-25,instagram,livrée,1580,40,1620,Meknès,carte
+CMD-00186,CLI-0026,2026-01-07,instagram,retournée,900,25,925,Agadir,à la livraison
+CMD-00187,CLI-0019,2026-01-25,whatsapp,livrée,320,30,350,Fès,carte
+CMD-00188,CLI-0038,2026-06-17,whatsapp,en préparation,1820,45,1865,Fès,à la livraison
+CMD-00189,CLI-0007,2026-03-06,whatsapp,livrée,1580,35,1615,Meknès,à la livraison
+CMD-00190,CLI-0012,2026-08-14,whatsapp,livrée,200,35,235,Oujda,à la livraison
+CMD-00191,CLI-0080,2026-08-11,whatsapp,livrée,1140,40,1180,Tétouan,carte
+CMD-00192,CLI-0038,2026-02-18,whatsapp,livrée,1880,30,1910,Fès,virement
+CMD-00193,CLI-0037,2026-07-19,whatsapp,en préparation,1840,40,1880,Fès,à la livraison
+CMD-00194,CLI-0044,2026-04-07,whatsapp,livrée,3030,35,3065,Agadir,virement
+CMD-00195,CLI-0051,2026-02-20,whatsapp,livrée,1320,45,1365,Marrakech,virement
+CMD-00196,CLI-0035,2026-04-01,whatsapp,panier abandonné,320,30,350,Rabat,carte
+CMD-00197,CLI-0109,2026-08-10,instagram,en préparation,1140,45,1185,Marrakech,à la livraison
+CMD-00198,CLI-0103,2026-01-23,whatsapp,annulée,1140,40,1180,Rabat,à la livraison
+CMD-00199,CLI-0024,2026-07-08,whatsapp,livrée,1140,25,1165,Oujda,à la livraison
+CMD-00200,CLI-0079,2026-08-21,whatsapp,livrée,550,40,590,Oujda,à la livraison
+CMD-00201,CLI-0065,2026-03-26,instagram,livrée,300,45,345,Marrakech,à la livraison
+CMD-00202,CLI-0054,2026-03-04,whatsapp,panier abandonné,200,40,240,Rabat,carte
+CMD-00203,CLI-0113,2026-07-18,whatsapp,panier abandonné,200,35,235,Salé,virement
+CMD-00204,CLI-0116,2026-03-10,whatsapp,annulée,520,25,545,Mohammedia,virement
+CMD-00205,CLI-0065,2026-07-15,whatsapp,livrée,740,30,770,Marrakech,virement
+CMD-00206,CLI-0048,2026-07-18,whatsapp,panier abandonné,840,40,880,Meknès,carte
+CMD-00207,CLI-0037,2026-01-10,whatsapp,panier abandonné,890,25,915,Fès,carte
+CMD-00208,CLI-0060,2026-01-25,whatsapp,livrée,300,25,325,Oujda,carte
+CMD-00209,CLI-0023,2026-07-10,whatsapp,en préparation,450,45,495,Tanger,à la livraison
+CMD-00210,CLI-0073,2026-04-20,whatsapp,livrée,700,35,735,Meknès,carte
+CMD-00211,CLI-0087,2026-05-18,whatsapp,livrée,450,45,495,Salé,virement
+CMD-00212,CLI-0118,2026-01-07,whatsapp,livrée,700,40,740,Meknès,carte
+CMD-00213,CLI-0008,2026-03-12,instagram,livrée,310,35,345,Mohammedia,virement
+CMD-00214,CLI-0089,2026-07-12,whatsapp,en préparation,2170,25,2195,Meknès,carte
+CMD-00215,CLI-0021,2026-05-27,whatsapp,livrée,730,40,770,Marrakech,à la livraison
+CMD-00216,CLI-0059,2026-01-14,instagram,livrée,1510,30,1540,Mohammedia,virement
+CMD-00217,CLI-0078,2026-05-24,whatsapp,panier abandonné,550,30,580,Kénitra,à la livraison
+CMD-00218,CLI-0105,2026-04-05,instagram,panier abandonné,1180,25,1205,Marrakech,à la livraison
+CMD-00219,CLI-0029,2026-03-04,whatsapp,en préparation,680,45,725,Kénitra,à la livraison
+CMD-00220,CLI-0116,2026-02-09,boutique,livrée,1320,35,1355,Mohammedia,à la livraison
+CMD-00221,CLI-0053,2026-08-16,whatsapp,annulée,840,25,865,Agadir,carte
+CMD-00222,CLI-0081,2026-02-16,instagram,annulée,680,30,710,Meknès,à la livraison
+CMD-00223,CLI-0039,2026-01-02,boutique,en préparation,1330,25,1355,Tétouan,à la livraison
+CMD-00224,CLI-0054,2026-04-07,boutique,retournée,90,25,115,Rabat,à la livraison
+CMD-00225,CLI-0067,2026-07-20,whatsapp,livrée,310,35,345,Tanger,carte
+CMD-00226,CLI-0089,2026-07-13,instagram,livrée,100,45,145,Meknès,à la livraison
+CMD-00227,CLI-0095,2026-06-11,whatsapp,livrée,730,45,775,Tétouan,carte
+CMD-00228,CLI-0042,2026-04-14,whatsapp,retournée,1440,35,1475,Mohammedia,virement
+CMD-00229,CLI-0070,2026-07-25,instagram,annulée,2900,25,2925,Meknès,virement
+CMD-00230,CLI-0063,2026-03-03,whatsapp,livrée,1190,40,1230,Agadir,virement
+CMD-00231,CLI-0068,2026-02-19,whatsapp,annulée,1190,30,1220,Fès,virement
+CMD-00232,CLI-0007,2026-06-07,whatsapp,livrée,960,25,985,Meknès,virement
+CMD-00233,CLI-0028,2026-03-25,instagram,livrée,1140,45,1185,Salé,à la livraison
+CMD-00234,CLI-0012,2026-02-02,whatsapp,panier abandonné,700,30,730,Oujda,à la livraison
+CMD-00235,CLI-0082,2026-07-22,whatsapp,livrée,4160,45,4205,Tanger,carte
+CMD-00236,CLI-0053,2026-08-04,whatsapp,livrée,310,35,345,Agadir,à la livraison
+CMD-00237,CLI-0020,2026-05-09,whatsapp,panier abandonné,450,25,475,Meknès,à la livraison
+CMD-00238,CLI-0112,2026-07-25,whatsapp,en préparation,1070,25,1095,Marrakech,à la livraison
+CMD-00239,CLI-0053,2026-05-19,whatsapp,panier abandonné,300,45,345,Agadir,virement
+CMD-00240,CLI-0103,2026-01-22,whatsapp,panier abandonné,190,25,215,Rabat,à la livraison
+CMD-00241,CLI-0092,2026-05-18,whatsapp,livrée,1350,45,1395,Tanger,à la livraison
+CMD-00242,CLI-0117,2026-06-25,whatsapp,livrée,2150,40,2190,Meknès,virement
+CMD-00243,CLI-0067,2026-07-16,whatsapp,panier abandonné,1190,30,1220,Tanger,à la livraison
+CMD-00244,CLI-0084,2026-04-01,whatsapp,livrée,550,40,590,Fès,virement
+CMD-00245,CLI-0081,2026-08-27,whatsapp,livrée,300,30,330,Meknès,virement
+CMD-00246,CLI-0045,2026-04-25,instagram,livrée,1190,40,1230,Tanger,carte
+CMD-00247,CLI-0091,2026-04-24,whatsapp,livrée,2450,30,2480,Tétouan,à la livraison
+CMD-00248,CLI-0025,2026-08-10,instagram,livrée,1920,40,1960,Rabat,carte
+CMD-00249,CLI-0061,2026-06-14,whatsapp,livrée,450,30,480,Kénitra,virement
+CMD-00250,CLI-0058,2026-07-19,whatsapp,en préparation,300,40,340,Agadir,à la livraison
+CMD-00251,CLI-0067,2026-05-11,whatsapp,livrée,320,30,350,Tanger,carte
+CMD-00252,CLI-0102,2026-07-18,whatsapp,livrée,2280,35,2315,Fès,carte
+CMD-00253,CLI-0064,2026-01-10,whatsapp,livrée,700,45,745,Tétouan,carte
+CMD-00254,CLI-0029,2026-07-04,whatsapp,livrée,550,45,595,Kénitra,carte
+CMD-00255,CLI-0030,2026-02-18,whatsapp,livrée,1320,30,1350,Fès,à la livraison
+CMD-00256,CLI-0054,2026-04-24,whatsapp,panier abandonné,960,35,995,Rabat,à la livraison
+CMD-00257,CLI-0071,2026-04-27,whatsapp,livrée,300,40,340,Fès,virement
+CMD-00258,CLI-0069,2026-05-25,whatsapp,livrée,1300,35,1335,Tétouan,à la livraison
+CMD-00259,CLI-0021,2026-02-21,whatsapp,annulée,320,30,350,Marrakech,virement
+CMD-00260,CLI-0102,2026-07-16,whatsapp,panier abandonné,2050,35,2085,Fès,à la livraison
+CMD-00261,CLI-0045,2026-07-20,whatsapp,livrée,550,30,580,Tanger,carte
+CMD-00262,CLI-0033,2026-01-16,instagram,livrée,1590,35,1625,Kénitra,à la livraison
+CMD-00263,CLI-0030,2026-07-17,boutique,panier abandonné,450,40,490,Fès,virement
+CMD-00264,CLI-0016,2026-05-11,whatsapp,en préparation,1580,45,1625,Marrakech,à la livraison
+CMD-00265,CLI-0051,2026-03-09,instagram,livrée,310,40,350,Marrakech,à la livraison
+CMD-00266,CLI-0085,2026-01-14,whatsapp,en préparation,680,25,705,Meknès,à la livraison
+CMD-00267,CLI-0035,2026-05-27,instagram,livrée,1820,45,1865,Rabat,à la livraison
+CMD-00268,CLI-0005,2026-06-01,whatsapp,livrée,310,25,335,Agadir,à la livraison
+CMD-00269,CLI-0086,2026-05-05,whatsapp,livrée,680,40,720,Salé,à la livraison
+CMD-00270,CLI-0057,2026-06-06,whatsapp,annulée,1550,25,1575,Oujda,carte
+CMD-00271,CLI-0029,2026-01-17,instagram,livrée,300,40,340,Kénitra,carte
+CMD-00272,CLI-0118,2026-07-19,whatsapp,livrée,320,40,360,Meknès,carte
+CMD-00273,CLI-0101,2026-02-16,whatsapp,livrée,680,45,725,Tétouan,virement
+CMD-00274,CLI-0027,2026-01-26,instagram,retournée,300,25,325,Kénitra,à la livraison
+CMD-00275,CLI-0030,2026-04-22,whatsapp,livrée,1580,40,1620,Fès,à la livraison
+CMD-00276,CLI-0020,2026-02-21,instagram,livrée,640,25,665,Meknès,virement
+CMD-00277,CLI-0093,2026-07-22,whatsapp,livrée,450,30,480,Agadir,à la livraison
+CMD-00278,CLI-0023,2026-03-17,whatsapp,livrée,300,25,325,Tanger,carte
+CMD-00279,CLI-0101,2026-05-16,whatsapp,en préparation,1580,30,1610,Tétouan,à la livraison
+CMD-00280,CLI-0081,2026-08-12,whatsapp,livrée,1030,40,1070,Meknès,carte
+CMD-00281,CLI-0066,2026-02-17,whatsapp,livrée,630,35,665,Agadir,à la livraison
+CMD-00282,CLI-0021,2026-06-27,whatsapp,livrée,1580,35,1615,Marrakech,carte
+CMD-00283,CLI-0015,2026-03-23,whatsapp,retournée,840,45,885,Mohammedia,à la livraison
+CMD-00284,CLI-0039,2026-01-11,whatsapp,annulée,550,30,580,Tétouan,carte
+CMD-00285,CLI-0016,2026-08-03,whatsapp,livrée,1580,35,1615,Marrakech,virement
+CMD-00286,CLI-0087,2026-02-18,whatsapp,livrée,1190,25,1215,Salé,à la livraison
+CMD-00287,CLI-0115,2026-03-24,whatsapp,livrée,1320,40,1360,Agadir,à la livraison
+CMD-00288,CLI-0099,2026-07-10,instagram,livrée,320,25,345,Casablanca,virement
+CMD-00289,CLI-0090,2026-03-24,whatsapp,livrée,1640,30,1670,Marrakech,virement
+CMD-00290,CLI-0098,2026-06-12,whatsapp,livrée,300,45,345,Fès,à la livraison
+CMD-00291,CLI-0087,2026-08-21,whatsapp,livrée,680,40,720,Salé,à la livraison
+CMD-00292,CLI-0019,2026-07-23,whatsapp,panier abandonné,300,35,335,Fès,à la livraison
+CMD-00293,CLI-0020,2026-08-26,whatsapp,annulée,1180,30,1210,Meknès,à la livraison
+CMD-00294,CLI-0070,2026-02-07,whatsapp,en préparation,300,25,325,Meknès,à la livraison
+CMD-00295,CLI-0062,2026-04-26,whatsapp,en préparation,680,40,720,Tanger,à la livraison
+CMD-00296,CLI-0005,2026-04-13,whatsapp,livrée,640,35,675,Agadir,virement
+CMD-00297,CLI-0080,2026-06-03,boutique,livrée,850,45,895,Tétouan,virement
+CMD-00298,CLI-0011,2026-07-19,whatsapp,livrée,1510,40,1550,Mohammedia,à la livraison
+CMD-00299,CLI-0056,2026-08-27,boutique,livrée,680,35,715,Marrakech,carte
+CMD-00300,CLI-0084,2026-02-11,whatsapp,livrée,1810,25,1835,Fès,à la livraison
+CMD-00301,CLI-0017,2026-04-16,boutique,en préparation,300,25,325,Fès,à la livraison
+CMD-00302,CLI-0067,2026-01-23,whatsapp,livrée,820,40,860,Tanger,à la livraison
+CMD-00303,CLI-0083,2026-07-24,instagram,livrée,2650,25,2675,Salé,virement
+CMD-00304,CLI-0118,2026-07-23,whatsapp,livrée,840,40,880,Meknès,virement
+CMD-00305,CLI-0094,2026-01-11,instagram,livrée,1940,35,1975,Marrakech,carte
+CMD-00306,CLI-0103,2026-04-22,whatsapp,livrée,1440,25,1465,Rabat,à la livraison
+CMD-00307,CLI-0078,2026-03-11,whatsapp,livrée,1940,40,1980,Kénitra,à la livraison
+CMD-00308,CLI-0029,2026-06-19,whatsapp,livrée,310,25,335,Kénitra,virement
+CMD-00309,CLI-0094,2026-02-24,boutique,livrée,1790,25,1815,Marrakech,à la livraison
+CMD-00310,CLI-0069,2026-02-20,whatsapp,livrée,1410,30,1440,Tétouan,virement
+CMD-00311,CLI-0056,2026-01-02,whatsapp,livrée,450,40,490,Marrakech,à la livraison
+CMD-00312,CLI-0036,2026-03-03,whatsapp,livrée,840,40,880,Fès,à la livraison
+CMD-00313,CLI-0029,2026-04-25,instagram,livrée,320,25,345,Kénitra,à la livraison
+CMD-00314,CLI-0104,2026-04-12,whatsapp,livrée,2510,45,2555,Salé,carte
+CMD-00315,CLI-0001,2026-04-02,instagram,livrée,1520,25,1545,Tanger,virement
+CMD-00316,CLI-0021,2026-03-09,whatsapp,livrée,200,25,225,Marrakech,à la livraison
+CMD-00317,CLI-0034,2026-03-10,whatsapp,livrée,2030,25,2055,Agadir,carte
+CMD-00318,CLI-0094,2026-06-16,whatsapp,en préparation,310,30,340,Marrakech,à la livraison
+CMD-00319,CLI-0089,2026-02-07,instagram,en préparation,2490,40,2530,Meknès,virement
+CMD-00320,CLI-0058,2026-02-07,whatsapp,livrée,620,45,665,Agadir,à la livraison

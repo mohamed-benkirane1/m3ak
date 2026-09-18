@@ -1,0 +1,13 @@
+ville,frais_mad,delai_heures,paiement_a_la_livraison,retrait_boutique
+Casablanca,25,72,oui,oui
+Rabat,25,48,oui,non
+Fès,35,24,non,oui
+Marrakech,45,48,oui,non
+Tanger,25,24,non,non
+Agadir,35,24,oui,non
+Meknès,45,24,oui,non
+Oujda,45,48,oui,non
+Kénitra,45,72,oui,non
+Tétouan,30,72,oui,non
+Salé,45,48,oui,non
+Mohammedia,35,24,oui,non

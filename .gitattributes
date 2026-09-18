@@ -1,1 +1,2 @@
 * text=auto eol=lf
+data/raw/*.csv -text !eol whitespace=cr-at-eol

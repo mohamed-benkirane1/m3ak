@@ -1,0 +1,450 @@
+commande_id,ref,modele,taille,quantite,prix_unitaire_mad
+CMD-00001,REF-0040,Ceinture blanc cassé,90,2,320
+CMD-00002,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00003,REF-0034,Sac à main vert olive,unique,1,840
+CMD-00004,REF-0063,Ceinture ivoire,95,1,300
+CMD-00005,REF-0042,Chemise vert olive,S,1,310
+CMD-00006,REF-0073,Pantalon camel,38,1,300
+CMD-00006,REF-0057,Chaussures terracotta,39,1,960
+CMD-00007,REF-0063,Ceinture ivoire,95,1,300
+CMD-00008,REF-0013,Blouson vert olive,M,1,700
+CMD-00008,REF-0011,Veste blanc cassé,XL,1,1190
+CMD-00009,REF-0036,Veste beige,M,1,1140
+CMD-00010,REF-0071,Chaussures camel,42,1,680
+CMD-00011,REF-0043,Chemise vert olive,M,1,310
+CMD-00012,REF-0012,Blouson vert olive,S,1,700
+CMD-00013,REF-0014,Blouson vert olive,L,1,700
+CMD-00014,REF-0064,Caftan noir,S,1,1030
+CMD-00014,REF-0043,Chemise vert olive,M,1,310
+CMD-00015,REF-0068,Chaussures camel,39,1,680
+CMD-00015,REF-0064,Caftan noir,S,1,1030
+CMD-00015,REF-0065,Caftan noir,M,1,1030
+CMD-00016,REF-0026,Pantalon camel,38,1,550
+CMD-00017,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00018,REF-0028,Pantalon camel,42,1,550
+CMD-00018,REF-0013,Blouson vert olive,M,1,700
+CMD-00019,REF-0080,Ceinture gris perle,85,1,310
+CMD-00020,REF-0003,Ceinture bordeaux,85,2,320
+CMD-00021,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00022,REF-0056,Chaussures terracotta,38,1,960
+CMD-00022,REF-0079,Caftan terracotta,L,1,1940
+CMD-00022,REF-0061,Ceinture ivoire,85,1,300
+CMD-00023,REF-0032,Robe terracotta,L,1,740
+CMD-00023,REF-0021,Caftan beige,L,1,1580
+CMD-00024,REF-0067,Chaussures camel,38,1,680
+CMD-00025,REF-0001,Foulard bordeaux,unique,1,100
+CMD-00026,REF-0071,Chaussures camel,42,1,680
+CMD-00027,REF-0043,Chemise vert olive,M,1,310
+CMD-00027,REF-0072,Sac à main noir,unique,1,1090
+CMD-00027,REF-0014,Blouson vert olive,L,1,700
+CMD-00028,REF-0011,Veste blanc cassé,XL,1,1190
+CMD-00029,REF-0073,Pantalon camel,38,1,300
+CMD-00030,REF-0046,Robe vert olive,S,1,450
+CMD-00030,REF-0059,Chaussures terracotta,41,1,960
+CMD-00031,REF-0012,Blouson vert olive,S,1,700
+CMD-00032,REF-0038,Veste beige,XL,1,1140
+CMD-00033,REF-0012,Blouson vert olive,S,1,700
+CMD-00033,REF-0050,Caftan bordeaux,S,1,1580
+CMD-00034,REF-0050,Caftan bordeaux,S,1,1580
+CMD-00035,REF-0014,Blouson vert olive,L,1,700
+CMD-00036,REF-0046,Robe vert olive,S,1,450
+CMD-00037,REF-0043,Chemise vert olive,M,1,310
+CMD-00037,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00038,REF-0061,Ceinture ivoire,85,1,300
+CMD-00038,REF-0028,Pantalon camel,42,1,550
+CMD-00039,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00039,REF-0057,Chaussures terracotta,39,1,960
+CMD-00040,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00041,REF-0012,Blouson vert olive,S,1,700
+CMD-00042,REF-0048,Robe vert olive,L,1,450
+CMD-00042,REF-0035,Veste beige,S,1,1140
+CMD-00043,REF-0036,Veste beige,M,1,1140
+CMD-00044,REF-0031,Robe terracotta,M,1,740
+CMD-00045,REF-0063,Ceinture ivoire,95,1,300
+CMD-00046,REF-0076,Pantalon camel,44,1,300
+CMD-00046,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00046,REF-0052,Caftan bordeaux,L,1,1580
+CMD-00047,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00048,REF-0001,Foulard bordeaux,unique,1,100
+CMD-00049,REF-0028,Pantalon camel,42,2,550
+CMD-00049,REF-0060,Chaussures terracotta,42,1,960
+CMD-00049,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00050,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00051,REF-0072,Sac à main noir,unique,1,1090
+CMD-00052,REF-0064,Caftan noir,S,1,1030
+CMD-00052,REF-0018,Ceinture vert olive,95,1,200
+CMD-00052,REF-0057,Chaussures terracotta,39,1,960
+CMD-00053,REF-0037,Veste beige,L,1,1140
+CMD-00054,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00054,REF-0006,Foulard bleu nuit,unique,1,190
+CMD-00055,REF-0064,Caftan noir,S,1,1030
+CMD-00055,REF-0068,Chaussures camel,39,1,680
+CMD-00056,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00056,REF-0046,Robe vert olive,S,2,450
+CMD-00057,REF-0056,Chaussures terracotta,38,1,960
+CMD-00058,REF-0077,Caftan terracotta,S,1,1940
+CMD-00059,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00060,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00061,REF-0016,Ceinture vert olive,85,1,200
+CMD-00062,REF-0024,Blouson bleu nuit,L,2,730
+CMD-00063,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00064,REF-0014,Blouson vert olive,L,1,700
+CMD-00065,REF-0063,Ceinture ivoire,95,1,300
+CMD-00065,REF-0060,Chaussures terracotta,42,1,960
+CMD-00065,REF-0049,Robe vert olive,XL,1,450
+CMD-00066,REF-0029,Pantalon camel,44,1,550
+CMD-00067,REF-0068,Chaussures camel,39,1,680
+CMD-00068,REF-0042,Chemise vert olive,S,1,310
+CMD-00069,REF-0068,Chaussures camel,39,1,680
+CMD-00069,REF-0061,Ceinture ivoire,85,1,300
+CMD-00070,REF-0075,Pantalon camel,42,2,300
+CMD-00071,REF-0035,Veste beige,S,2,1140
+CMD-00072,REF-0067,Chaussures camel,38,1,680
+CMD-00073,REF-0077,Caftan terracotta,S,1,1940
+CMD-00074,REF-0067,Chaussures camel,38,1,680
+CMD-00075,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00076,REF-0008,Veste blanc cassé,S,1,1190
+CMD-00077,REF-0036,Veste beige,M,1,1140
+CMD-00077,REF-0069,Chaussures camel,40,1,680
+CMD-00078,REF-0031,Robe terracotta,M,2,740
+CMD-00078,REF-0018,Ceinture vert olive,95,1,200
+CMD-00079,REF-0008,Veste blanc cassé,S,1,1190
+CMD-00080,REF-0013,Blouson vert olive,M,1,700
+CMD-00081,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00081,REF-0016,Ceinture vert olive,85,1,200
+CMD-00081,REF-0032,Robe terracotta,L,1,740
+CMD-00082,REF-0063,Ceinture ivoire,95,1,300
+CMD-00083,REF-0021,Caftan beige,L,1,1580
+CMD-00083,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00083,REF-0056,Chaussures terracotta,38,1,960
+CMD-00084,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00085,REF-0004,Ceinture bordeaux,90,2,320
+CMD-00086,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00086,REF-0073,Pantalon camel,38,1,300
+CMD-00086,REF-0064,Caftan noir,S,1,1030
+CMD-00087,REF-0014,Blouson vert olive,L,2,700
+CMD-00088,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00089,REF-0012,Blouson vert olive,S,1,700
+CMD-00089,REF-0076,Pantalon camel,44,1,300
+CMD-00089,REF-0076,Pantalon camel,44,1,300
+CMD-00090,REF-0038,Veste beige,XL,1,1140
+CMD-00090,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00091,REF-0059,Chaussures terracotta,41,1,960
+CMD-00091,REF-0012,Blouson vert olive,S,1,700
+CMD-00091,REF-0073,Pantalon camel,38,1,300
+CMD-00092,REF-0057,Chaussures terracotta,39,1,960
+CMD-00093,REF-0080,Ceinture gris perle,85,1,310
+CMD-00094,REF-0042,Chemise vert olive,S,1,310
+CMD-00095,REF-0062,Ceinture ivoire,90,1,300
+CMD-00096,REF-0012,Blouson vert olive,S,1,700
+CMD-00097,REF-0057,Chaussures terracotta,39,1,960
+CMD-00098,REF-0034,Sac à main vert olive,unique,1,840
+CMD-00098,REF-0007,Sac à main gris perle,unique,2,600
+CMD-00099,REF-0071,Chaussures camel,42,1,680
+CMD-00099,REF-0038,Veste beige,XL,1,1140
+CMD-00100,REF-0053,Foulard bleu nuit,unique,1,90
+CMD-00101,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00101,REF-0071,Chaussures camel,42,1,680
+CMD-00102,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00103,REF-0028,Pantalon camel,42,1,550
+CMD-00104,REF-0061,Ceinture ivoire,85,1,300
+CMD-00105,REF-0014,Blouson vert olive,L,1,700
+CMD-00106,REF-0035,Veste beige,S,1,1140
+CMD-00107,REF-0079,Caftan terracotta,L,1,1940
+CMD-00107,REF-0080,Ceinture gris perle,85,1,310
+CMD-00108,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00108,REF-0050,Caftan bordeaux,S,1,1580
+CMD-00108,REF-0062,Ceinture ivoire,90,1,300
+CMD-00109,REF-0029,Pantalon camel,44,1,550
+CMD-00110,REF-0021,Caftan beige,L,1,1580
+CMD-00111,REF-0060,Chaussures terracotta,42,1,960
+CMD-00112,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00113,REF-0031,Robe terracotta,M,1,740
+CMD-00114,REF-0056,Chaussures terracotta,38,1,960
+CMD-00115,REF-0002,Sac à main noir,unique,1,1320
+CMD-00116,REF-0079,Caftan terracotta,L,1,1940
+CMD-00116,REF-0053,Foulard bleu nuit,unique,1,90
+CMD-00117,REF-0048,Robe vert olive,L,1,450
+CMD-00118,REF-0076,Pantalon camel,44,1,300
+CMD-00119,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00120,REF-0026,Pantalon camel,38,1,550
+CMD-00121,REF-0065,Caftan noir,M,1,1030
+CMD-00121,REF-0077,Caftan terracotta,S,1,1940
+CMD-00121,REF-0012,Blouson vert olive,S,1,700
+CMD-00122,REF-0038,Veste beige,XL,1,1140
+CMD-00123,REF-0029,Pantalon camel,44,1,550
+CMD-00124,REF-0002,Sac à main noir,unique,1,1320
+CMD-00125,REF-0016,Ceinture vert olive,85,2,200
+CMD-00125,REF-0021,Caftan beige,L,1,1580
+CMD-00125,REF-0052,Caftan bordeaux,L,1,1580
+CMD-00126,REF-0009,Veste blanc cassé,M,2,1190
+CMD-00127,REF-0063,Ceinture ivoire,95,1,300
+CMD-00127,REF-0032,Robe terracotta,L,1,740
+CMD-00128,REF-0057,Chaussures terracotta,39,1,960
+CMD-00129,REF-0042,Chemise vert olive,S,1,310
+CMD-00130,REF-0059,Chaussures terracotta,41,1,960
+CMD-00131,REF-0006,Foulard bleu nuit,unique,1,190
+CMD-00132,REF-0071,Chaussures camel,42,1,680
+CMD-00132,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00133,REF-0074,Pantalon camel,40,1,300
+CMD-00134,REF-0012,Blouson vert olive,S,1,700
+CMD-00134,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00135,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00136,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00136,REF-0076,Pantalon camel,44,2,300
+CMD-00137,REF-0044,Chemise vert olive,L,1,310
+CMD-00138,REF-0026,Pantalon camel,38,1,550
+CMD-00138,REF-0040,Ceinture blanc cassé,90,2,320
+CMD-00139,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00140,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00141,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00142,REF-0060,Chaussures terracotta,42,1,960
+CMD-00143,REF-0062,Ceinture ivoire,90,1,300
+CMD-00144,REF-0032,Robe terracotta,L,1,740
+CMD-00145,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00145,REF-0057,Chaussures terracotta,39,1,960
+CMD-00146,REF-0002,Sac à main noir,unique,1,1320
+CMD-00146,REF-0070,Chaussures camel,41,1,680
+CMD-00146,REF-0021,Caftan beige,L,1,1580
+CMD-00147,REF-0011,Veste blanc cassé,XL,1,1190
+CMD-00147,REF-0035,Veste beige,S,1,1140
+CMD-00148,REF-0007,Sac à main gris perle,unique,1,600
+CMD-00148,REF-0052,Caftan bordeaux,L,1,1580
+CMD-00148,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00149,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00149,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00150,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00151,REF-0012,Blouson vert olive,S,1,700
+CMD-00152,REF-0065,Caftan noir,M,1,1030
+CMD-00152,REF-0053,Foulard bleu nuit,unique,1,90
+CMD-00152,REF-0038,Veste beige,XL,1,1140
+CMD-00153,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00154,REF-0057,Chaussures terracotta,39,1,960
+CMD-00155,REF-0044,Chemise vert olive,L,1,310
+CMD-00156,REF-0080,Ceinture gris perle,85,1,310
+CMD-00156,REF-0036,Veste beige,M,1,1140
+CMD-00156,REF-0056,Chaussures terracotta,38,1,960
+CMD-00157,REF-0008,Veste blanc cassé,S,1,1190
+CMD-00158,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00158,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00159,REF-0013,Blouson vert olive,M,1,700
+CMD-00160,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00160,REF-0073,Pantalon camel,38,1,300
+CMD-00161,REF-0071,Chaussures camel,42,1,680
+CMD-00162,REF-0018,Ceinture vert olive,95,1,200
+CMD-00163,REF-0060,Chaussures terracotta,42,1,960
+CMD-00164,REF-0064,Caftan noir,S,1,1030
+CMD-00164,REF-0016,Ceinture vert olive,85,1,200
+CMD-00164,REF-0031,Robe terracotta,M,1,740
+CMD-00165,REF-0016,Ceinture vert olive,85,1,200
+CMD-00166,REF-0035,Veste beige,S,1,1140
+CMD-00167,REF-0018,Ceinture vert olive,95,1,200
+CMD-00168,REF-0035,Veste beige,S,1,1140
+CMD-00169,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00170,REF-0051,Caftan bordeaux,M,1,1580
+CMD-00170,REF-0038,Veste beige,XL,1,1140
+CMD-00171,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00172,REF-0021,Caftan beige,L,1,1580
+CMD-00172,REF-0080,Ceinture gris perle,85,1,310
+CMD-00172,REF-0041,Ceinture blanc cassé,95,2,320
+CMD-00173,REF-0026,Pantalon camel,38,1,550
+CMD-00174,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00174,REF-0060,Chaussures terracotta,42,2,960
+CMD-00175,REF-0074,Pantalon camel,40,1,300
+CMD-00176,REF-0029,Pantalon camel,44,1,550
+CMD-00177,REF-0031,Robe terracotta,M,1,740
+CMD-00178,REF-0044,Chemise vert olive,L,1,310
+CMD-00178,REF-0060,Chaussures terracotta,42,1,960
+CMD-00179,REF-0004,Ceinture bordeaux,90,2,320
+CMD-00180,REF-0051,Caftan bordeaux,M,1,1580
+CMD-00181,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00181,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00182,REF-0073,Pantalon camel,38,1,300
+CMD-00183,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00184,REF-0079,Caftan terracotta,L,1,1940
+CMD-00185,REF-0021,Caftan beige,L,1,1580
+CMD-00186,REF-0046,Robe vert olive,S,1,450
+CMD-00186,REF-0049,Robe vert olive,XL,1,450
+CMD-00187,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00188,REF-0072,Sac à main noir,unique,1,1090
+CMD-00188,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00189,REF-0021,Caftan beige,L,1,1580
+CMD-00190,REF-0018,Ceinture vert olive,95,1,200
+CMD-00191,REF-0035,Veste beige,S,1,1140
+CMD-00192,REF-0061,Ceinture ivoire,85,1,300
+CMD-00192,REF-0051,Caftan bordeaux,M,1,1580
+CMD-00193,REF-0012,Blouson vert olive,S,1,700
+CMD-00193,REF-0037,Veste beige,L,1,1140
+CMD-00194,REF-0079,Caftan terracotta,L,1,1940
+CMD-00194,REF-0072,Sac à main noir,unique,1,1090
+CMD-00195,REF-0002,Sac à main noir,unique,1,1320
+CMD-00196,REF-0039,Ceinture blanc cassé,85,1,320
+CMD-00197,REF-0037,Veste beige,L,1,1140
+CMD-00198,REF-0035,Veste beige,S,1,1140
+CMD-00199,REF-0038,Veste beige,XL,1,1140
+CMD-00200,REF-0028,Pantalon camel,42,1,550
+CMD-00201,REF-0061,Ceinture ivoire,85,1,300
+CMD-00202,REF-0018,Ceinture vert olive,95,1,200
+CMD-00203,REF-0018,Ceinture vert olive,95,1,200
+CMD-00204,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00204,REF-0018,Ceinture vert olive,95,1,200
+CMD-00205,REF-0032,Robe terracotta,L,1,740
+CMD-00206,REF-0034,Sac à main vert olive,unique,1,840
+CMD-00207,REF-0013,Blouson vert olive,M,1,700
+CMD-00207,REF-0006,Foulard bleu nuit,unique,1,190
+CMD-00208,REF-0075,Pantalon camel,42,1,300
+CMD-00209,REF-0048,Robe vert olive,L,1,450
+CMD-00210,REF-0014,Blouson vert olive,L,1,700
+CMD-00211,REF-0049,Robe vert olive,XL,1,450
+CMD-00212,REF-0013,Blouson vert olive,M,1,700
+CMD-00213,REF-0044,Chemise vert olive,L,1,310
+CMD-00214,REF-0064,Caftan noir,S,1,1030
+CMD-00214,REF-0037,Veste beige,L,1,1140
+CMD-00215,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00216,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00216,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00217,REF-0029,Pantalon camel,44,1,550
+CMD-00218,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00218,REF-0049,Robe vert olive,XL,1,450
+CMD-00219,REF-0071,Chaussures camel,42,1,680
+CMD-00220,REF-0002,Sac à main noir,unique,1,1320
+CMD-00221,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00222,REF-0068,Chaussures camel,39,1,680
+CMD-00223,REF-0065,Caftan noir,M,1,1030
+CMD-00223,REF-0061,Ceinture ivoire,85,1,300
+CMD-00224,REF-0053,Foulard bleu nuit,unique,1,90
+CMD-00225,REF-0044,Chemise vert olive,L,1,310
+CMD-00226,REF-0001,Foulard bordeaux,unique,1,100
+CMD-00227,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00228,REF-0036,Veste beige,M,1,1140
+CMD-00228,REF-0074,Pantalon camel,40,1,300
+CMD-00229,REF-0077,Caftan terracotta,S,1,1940
+CMD-00229,REF-0060,Chaussures terracotta,42,1,960
+CMD-00230,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00231,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00232,REF-0056,Chaussures terracotta,38,1,960
+CMD-00233,REF-0035,Veste beige,S,1,1140
+CMD-00234,REF-0013,Blouson vert olive,M,1,700
+CMD-00235,REF-0050,Caftan bordeaux,S,2,1580
+CMD-00235,REF-0071,Chaussures camel,42,1,680
+CMD-00235,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00236,REF-0044,Chemise vert olive,L,1,310
+CMD-00237,REF-0046,Robe vert olive,S,1,450
+CMD-00238,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00238,REF-0048,Robe vert olive,L,1,450
+CMD-00238,REF-0063,Ceinture ivoire,95,1,300
+CMD-00239,REF-0076,Pantalon camel,44,1,300
+CMD-00240,REF-0006,Foulard bleu nuit,unique,1,190
+CMD-00241,REF-0006,Foulard bleu nuit,unique,1,190
+CMD-00241,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00241,REF-0034,Sac à main vert olive,unique,1,840
+CMD-00242,REF-0056,Chaussures terracotta,38,1,960
+CMD-00242,REF-0011,Veste blanc cassé,XL,1,1190
+CMD-00243,REF-0011,Veste blanc cassé,XL,1,1190
+CMD-00244,REF-0028,Pantalon camel,42,1,550
+CMD-00245,REF-0073,Pantalon camel,38,1,300
+CMD-00246,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00247,REF-0067,Chaussures camel,38,2,680
+CMD-00247,REF-0072,Sac à main noir,unique,1,1090
+CMD-00248,REF-0008,Veste blanc cassé,S,1,1190
+CMD-00248,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00249,REF-0046,Robe vert olive,S,1,450
+CMD-00250,REF-0062,Ceinture ivoire,90,1,300
+CMD-00251,REF-0040,Ceinture blanc cassé,90,1,320
+CMD-00252,REF-0037,Veste beige,L,2,1140
+CMD-00253,REF-0016,Ceinture vert olive,85,2,200
+CMD-00253,REF-0073,Pantalon camel,38,1,300
+CMD-00254,REF-0028,Pantalon camel,42,1,550
+CMD-00255,REF-0002,Sac à main noir,unique,1,1320
+CMD-00256,REF-0057,Chaussures terracotta,39,1,960
+CMD-00257,REF-0061,Ceinture ivoire,85,1,300
+CMD-00258,REF-0062,Ceinture ivoire,90,1,300
+CMD-00258,REF-0014,Blouson vert olive,L,1,700
+CMD-00258,REF-0076,Pantalon camel,44,1,300
+CMD-00259,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00260,REF-0002,Sac à main noir,unique,1,1320
+CMD-00260,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00261,REF-0028,Pantalon camel,42,1,550
+CMD-00262,REF-0028,Pantalon camel,42,1,550
+CMD-00262,REF-0031,Robe terracotta,M,1,740
+CMD-00262,REF-0063,Ceinture ivoire,95,1,300
+CMD-00263,REF-0046,Robe vert olive,S,1,450
+CMD-00264,REF-0050,Caftan bordeaux,S,1,1580
+CMD-00265,REF-0080,Ceinture gris perle,85,1,310
+CMD-00266,REF-0067,Chaussures camel,38,1,680
+CMD-00267,REF-0037,Veste beige,L,1,1140
+CMD-00267,REF-0069,Chaussures camel,40,1,680
+CMD-00268,REF-0043,Chemise vert olive,M,1,310
+CMD-00269,REF-0068,Chaussures camel,39,1,680
+CMD-00270,REF-0012,Blouson vert olive,S,1,700
+CMD-00270,REF-0028,Pantalon camel,42,1,550
+CMD-00270,REF-0073,Pantalon camel,38,1,300
+CMD-00271,REF-0074,Pantalon camel,40,1,300
+CMD-00272,REF-0003,Ceinture bordeaux,85,1,320
+CMD-00273,REF-0071,Chaussures camel,42,1,680
+CMD-00274,REF-0074,Pantalon camel,40,1,300
+CMD-00275,REF-0050,Caftan bordeaux,S,1,1580
+CMD-00276,REF-0003,Ceinture bordeaux,85,2,320
+CMD-00277,REF-0049,Robe vert olive,XL,1,450
+CMD-00278,REF-0061,Ceinture ivoire,85,1,300
+CMD-00279,REF-0021,Caftan beige,L,1,1580
+CMD-00280,REF-0064,Caftan noir,S,1,1030
+CMD-00281,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00281,REF-0042,Chemise vert olive,S,1,310
+CMD-00282,REF-0052,Caftan bordeaux,L,1,1580
+CMD-00283,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00284,REF-0028,Pantalon camel,42,1,550
+CMD-00285,REF-0021,Caftan beige,L,1,1580
+CMD-00286,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00287,REF-0002,Sac à main noir,unique,1,1320
+CMD-00288,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00289,REF-0049,Robe vert olive,XL,1,450
+CMD-00289,REF-0010,Veste blanc cassé,L,1,1190
+CMD-00290,REF-0076,Pantalon camel,44,1,300
+CMD-00291,REF-0068,Chaussures camel,39,1,680
+CMD-00292,REF-0062,Ceinture ivoire,90,1,300
+CMD-00293,REF-0048,Robe vert olive,L,1,450
+CMD-00293,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00294,REF-0073,Pantalon camel,38,1,300
+CMD-00295,REF-0071,Chaussures camel,42,1,680
+CMD-00296,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00296,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00297,REF-0026,Pantalon camel,38,1,550
+CMD-00297,REF-0061,Ceinture ivoire,85,1,300
+CMD-00298,REF-0057,Chaussures terracotta,39,1,960
+CMD-00298,REF-0026,Pantalon camel,38,1,550
+CMD-00299,REF-0068,Chaussures camel,39,1,680
+CMD-00300,REF-0073,Pantalon camel,38,1,300
+CMD-00300,REF-0056,Chaussures terracotta,38,1,960
+CMD-00300,REF-0026,Pantalon camel,38,1,550
+CMD-00301,REF-0062,Ceinture ivoire,90,1,300
+CMD-00302,REF-0022,Blouson bleu nuit,S,1,730
+CMD-00302,REF-0053,Foulard bleu nuit,unique,1,90
+CMD-00303,REF-0005,Ceinture bordeaux,95,1,320
+CMD-00303,REF-0009,Veste blanc cassé,M,1,1190
+CMD-00303,REF-0038,Veste beige,XL,1,1140
+CMD-00304,REF-0025,Sac à main blanc cassé,unique,1,840
+CMD-00305,REF-0079,Caftan terracotta,L,1,1940
+CMD-00306,REF-0031,Robe terracotta,M,1,740
+CMD-00306,REF-0014,Blouson vert olive,L,1,700
+CMD-00307,REF-0077,Caftan terracotta,S,1,1940
+CMD-00308,REF-0080,Ceinture gris perle,85,1,310
+CMD-00309,REF-0064,Caftan noir,S,1,1030
+CMD-00309,REF-0044,Chemise vert olive,L,1,310
+CMD-00309,REF-0049,Robe vert olive,XL,1,450
+CMD-00310,REF-0068,Chaussures camel,39,1,680
+CMD-00310,REF-0024,Blouson bleu nuit,L,1,730
+CMD-00311,REF-0048,Robe vert olive,L,1,450
+CMD-00312,REF-0034,Sac à main vert olive,unique,1,840
+CMD-00313,REF-0004,Ceinture bordeaux,90,1,320
+CMD-00314,REF-0002,Sac à main noir,unique,1,1320
+CMD-00314,REF-0008,Veste blanc cassé,S,1,1190
+CMD-00315,REF-0007,Sac à main gris perle,unique,2,600
+CMD-00315,REF-0041,Ceinture blanc cassé,95,1,320
+CMD-00316,REF-0016,Ceinture vert olive,85,1,200
+CMD-00317,REF-0052,Caftan bordeaux,L,1,1580
+CMD-00317,REF-0048,Robe vert olive,L,1,450
+CMD-00318,REF-0043,Chemise vert olive,M,1,310
+CMD-00319,REF-0029,Pantalon camel,44,1,550
+CMD-00319,REF-0079,Caftan terracotta,L,1,1940
+CMD-00320,REF-0044,Chemise vert olive,L,2,310
