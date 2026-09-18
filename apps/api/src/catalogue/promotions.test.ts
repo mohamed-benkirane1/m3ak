@@ -1,7 +1,7 @@
 import { PromotionSchema } from "@m3ak/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { postgresPool } from "../infrastructure/postgres";
-import { getApplicablePromotion, validateDiscount } from "./promotions";
+import { getApplicablePromotion, getProductPricingContext, validateDiscount } from "./promotions";
 import type { ProductRow } from "./products";
 
 const KNOWN_CONDITION = "dans la limite des stocks disponibles";
@@ -434,6 +434,67 @@ describe("validateDiscount — malformed requestedPriceCents rejected before any
     await expect(validateDiscount("REF-0001", Number.NaN, "2026-09-15")).rejects.toThrow();
     await expect(validateDiscount("REF-0001", Number.POSITIVE_INFINITY, "2026-09-15")).rejects.toThrow();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("getProductPricingContext — TASK-011 cents-safe pricing helper (PA-PD)", () => {
+  it("PA: a non-promoted product returns catalogue cents, promotionActive:false", async () => {
+    const spy = vi.spyOn(postgresPool, "query");
+    spy.mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0001", price_cents: 10000, stock: 2 })] } as never);
+    spy.mockResolvedValueOnce({ rows: [] } as never);
+
+    const result = await getProductPricingContext("REF-0001", "2026-09-15");
+
+    expect(result).toEqual({
+      found: true,
+      ref: "REF-0001",
+      stock: 2,
+      cataloguePriceCents: 10000,
+      effectivePriceCents: 10000,
+      promotionActive: false,
+    });
+  });
+
+  it("PB: a promoted product returns promo cents as effective, promotionActive:true", async () => {
+    const spy = vi.spyOn(postgresPool, "query");
+    spy.mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0018", price_cents: 20000, stock: 1 })] } as never);
+    spy.mockResolvedValueOnce({
+      rows: [makePromotionRow({ product_ref: "REF-0018", normal_price_cents: 20000, promo_price_cents: 16000 })],
+    } as never);
+
+    const result = await getProductPricingContext("REF-0018", "2026-09-15");
+
+    expect(result).toEqual({
+      found: true,
+      ref: "REF-0018",
+      stock: 1,
+      cataloguePriceCents: 20000,
+      effectivePriceCents: 16000,
+      promotionActive: true,
+    });
+  });
+
+  it("PC: stock is passed through exactly as stored, including 0", async () => {
+    const spy = vi.spyOn(postgresPool, "query");
+    spy.mockResolvedValueOnce({ rows: [makeProductRow({ ref: "REF-0015", price_cents: 82000, stock: 0 })] } as never);
+    spy.mockResolvedValueOnce({ rows: [] } as never);
+
+    const result = await getProductPricingContext("REF-0015", "2026-09-15");
+
+    expect(result).toEqual({
+      found: true,
+      ref: "REF-0015",
+      stock: 0,
+      cataloguePriceCents: 82000,
+      effectivePriceCents: 82000,
+      promotionActive: false,
+    });
+  });
+
+  it("PD: an unknown product returns found:false", async () => {
+    vi.spyOn(postgresPool, "query").mockResolvedValueOnce({ rows: [] } as never);
+    const result = await getProductPricingContext("REF-9999", "2026-09-15");
+    expect(result).toEqual({ found: false, ref: "REF-9999" });
   });
 });
 

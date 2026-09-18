@@ -174,6 +174,49 @@ async function resolvePromotionContext(ref: string, asOfDate: string): Promise<R
   return { found: true, productRow, promotionRow };
 }
 
+export type ProductPricingContextResult =
+  | { found: false; ref: string }
+  | {
+      found: true;
+      ref: string;
+      stock: number;
+      cataloguePriceCents: number;
+      effectivePriceCents: number;
+      promotionActive: boolean;
+    };
+
+// Narrow, cents-safe public surface onto resolvePromotionContext for callers
+// (TASK-011's cart) that need authoritative stock + price without either
+// exposing the private raw DB row shapes or round-tripping through the
+// MAD-converted Product/Promotion contracts (see resolvePromotionContext's own
+// comment on why that round trip is deliberately avoided). Inherits every
+// existing integrity/condition/stock rule unchanged: a stock=0 "while stocks
+// last" promotion still resolves here as promotionActive:false, catalogue
+// price — addCartItem's own stock check is what rejects that case, not this
+// function pretending the promotion is inactive for any other reason.
+export async function getProductPricingContext(
+  rawRef: unknown,
+  rawAsOfDate: unknown,
+): Promise<ProductPricingContextResult> {
+  const ref = ProductRefInputSchema.parse(rawRef);
+  const asOfDate = IsoDateSchema.parse(rawAsOfDate);
+
+  const context = await resolvePromotionContext(ref, asOfDate);
+  if (!context.found) {
+    return { found: false, ref };
+  }
+
+  const { productRow, promotionRow } = context;
+  return {
+    found: true,
+    ref,
+    stock: productRow.stock,
+    cataloguePriceCents: productRow.price_cents,
+    effectivePriceCents: promotionRow ? promotionRow.promo_price_cents : productRow.price_cents,
+    promotionActive: promotionRow !== null,
+  };
+}
+
 export async function getApplicablePromotion(
   rawRef: unknown,
   rawAsOfDate: unknown,
