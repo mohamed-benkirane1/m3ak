@@ -10,9 +10,9 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "typecheck": "npm run build --workspace @m3ak/shared && npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspace @m3ak/shared && npm run build --workspaces --if-present",
+    "test": "npm run build --workspace @m3ak/shared && npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "typescript": "5.9.3"

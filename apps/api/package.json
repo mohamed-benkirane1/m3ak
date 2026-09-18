@@ -8,9 +8,11 @@
     "start": "node dist/index.js",
     "db:migrate": "node-pg-migrate up -m db/migrations",
     "db:migrate:down": "node-pg-migrate down -m db/migrations",
-    "db:seed": "tsc -p tsconfig.json && node dist/db/seed/kenza.js"
+    "db:seed": "tsc -p tsconfig.json && node dist/db/seed/kenza.js",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@m3ak/shared": "0.1.0",
     "csv-parse": "7.0.2",
     "fastify": "^5.12.5",
     "pg": "^8.23.0",
@@ -20,6 +22,7 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/pg": "^8.23.1",
-    "node-pg-migrate": "9.0.0"
+    "node-pg-migrate": "9.0.0",
+    "vitest": "4.1.11"
   }
 }
