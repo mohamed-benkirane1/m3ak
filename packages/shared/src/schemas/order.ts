@@ -11,9 +11,12 @@ export const OrderStatusSchema = z.enum(["confirmed"]);
 
 export type OrderStatus = z.infer<typeof OrderStatusSchema>;
 
-// Seul le paiement à la livraison est dans le périmètre du MVP (spec.md §12
-// exclut le paiement en ligne réel ; design.md ne mentionne que le COD).
-export const PaymentMethodSchema = z.enum(["cash_on_delivery"]);
+// Trois moyens de paiement confirmés par la FAQ officielle et commandes.csv
+// (dataset Kenza) : paiement à la livraison, virement bancaire, carte.
+// Aucun paiement en ligne réel n'est implémenté ici (spec.md §12) — ce
+// schema ne fait que refléter les valeurs réellement observées dans les
+// données, sans en activer le traitement applicatif.
+export const PaymentMethodSchema = z.enum(["cash_on_delivery", "bank_transfer", "card"]);
 
 export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OrderSchema } from "./order";
+import { OrderSchema, PaymentMethodSchema } from "./order";
 
 const validOrder = {
   id: "order-1",
@@ -33,5 +33,15 @@ describe("OrderSchema", () => {
   it("rejects a cancelled status (not yet part of the documented lifecycle)", () => {
     const result = OrderSchema.safeParse({ ...validOrder, status: "cancelled" });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("PaymentMethodSchema", () => {
+  it.each(["cash_on_delivery", "bank_transfer", "card"] as const)("accepts %s", (value) => {
+    expect(PaymentMethodSchema.safeParse(value).success).toBe(true);
+  });
+
+  it("rejects an unknown payment method", () => {
+    expect(PaymentMethodSchema.safeParse("crypto").success).toBe(false);
   });
 });
