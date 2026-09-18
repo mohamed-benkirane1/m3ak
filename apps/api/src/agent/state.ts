@@ -69,7 +69,10 @@ const DeliverySnapshotSchema = z.object({
 }).strict();
 
 // Protect every state field before object parsing, including snapshot inputs.
-export const M3AKStateSchema = JsonInputSchema.pipe(z.object({
+// Exported separately (pre-pipe) so LangGraph's StateGraph can read a bare
+// ZodObject for channel construction; JsonInputSchema's whole-root safety
+// checks below are not reproduced by that per-field usage — see graph.ts.
+export const M3AKStateObjectSchema = z.object({
   threadId: IdSchema,
   conversationId: IdSchema.nullable(),
   customerId: IdSchema.nullable(),
@@ -97,6 +100,8 @@ export const M3AKStateSchema = JsonInputSchema.pipe(z.object({
   orderId: IdSchema.nullable(),
   escalationId: IdSchema.nullable(),
   followupId: IdSchema.nullable(),
-}).strict());
+}).strict();
+
+export const M3AKStateSchema = JsonInputSchema.pipe(M3AKStateObjectSchema);
 
 export type M3AKState = z.infer<typeof M3AKStateSchema>;

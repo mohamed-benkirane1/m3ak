@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.16",
     "@m3ak/shared": "0.1.0",
     "csv-parse": "7.0.2",
     "fastify": "^5.12.5",
