@@ -21,6 +21,17 @@ vi.mock("../conversation/conversation", () => ({
   persistConversation: vi.fn(),
 }));
 
+// Partial mock: state.ts imports the real CustomerMemorySchema from this same
+// module to build M3AKStateObjectSchema, so only getCustomerMemory itself is
+// replaced.
+vi.mock("../customer/customerMemory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../customer/customerMemory")>();
+  return {
+    ...actual,
+    getCustomerMemory: vi.fn(),
+  };
+});
+
 // TASK-024: a real MemorySaver stands in for the production PostgreSQL
 // checkpointer (decision #2 — MemorySaver is permitted only in tests). It is
 // constructed via a dynamic import inside the factory to avoid referencing
@@ -49,6 +60,7 @@ vi.mock("./guardrails", async (importOriginal) => {
 
 import { MemorySaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
+import { getCustomerMemory } from "../customer/customerMemory";
 import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
@@ -64,6 +76,7 @@ const mockedCreateEscalation = vi.mocked(createEscalation);
 const mockedEvaluateCommercialGuardrails = vi.mocked(evaluateCommercialGuardrails);
 const mockedLoadConversationContext = vi.mocked(loadConversationContext);
 const mockedPersistConversation = vi.mocked(persistConversation);
+const mockedGetCustomerMemory = vi.mocked(getCustomerMemory);
 
 const DEFAULT_PERSISTED_CONVERSATION = {
   id: "default-conversation",
@@ -87,6 +100,9 @@ beforeEach(() => {
     conversation: DEFAULT_PERSISTED_CONVERSATION,
     newMessageCount: 0,
   });
+  // Safe default for every pre-existing test that never mentions customer
+  // memory: no memory found (customerMemory stays null downstream).
+  mockedGetCustomerMemory.mockResolvedValue({ found: false });
 });
 
 afterEach(() => {
@@ -102,6 +118,7 @@ const initialState: M3AKState = {
   threadId: "thread-fixture-020",
   conversationId: null,
   customerId: null,
+  customerMemory: null,
   messages: [],
   summary: null,
   language: "unknown",
@@ -994,6 +1011,187 @@ describe("loadContext — TASK-023 integration", () => {
     expect(result.authorized).toBeNull();
     expect(result.activePlan).toEqual([]);
     expect(result.executedSteps).toEqual([]);
+  });
+});
+
+describe("loadContext — TASK-025 customer memory integration", () => {
+  const FOUND_CONVERSATION_FOR_MEMORY = {
+    id: "conversation-mem",
+    customerId: "customer-mem",
+    status: "active" as const,
+    language: "darija" as const,
+    createdAt: "2026-09-18T10:00:00.000Z",
+    updatedAt: "2026-09-19T09:00:00.000Z",
+  };
+
+  const SAMPLE_MEMORY = {
+    city: "Casablanca",
+    preferredLanguage: "french" as const,
+    totalKnownOrders: 2,
+    latestOrderDate: "2026-08-01T00:00:00.000Z",
+    recentProducts: ["REF-001"],
+  };
+
+  it("1: conversation/customer unresolved -> no memory lookup at all", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({ found: false });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedGetCustomerMemory).not.toHaveBeenCalled();
+    expect(result.customerMemory).toBeNull();
+  });
+
+  it("2: a resolved customerId calls getCustomerMemory with exactly that id", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true, conversation: FOUND_CONVERSATION_FOR_MEMORY, messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: SAMPLE_MEMORY });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    await invokeSalesGraph(initialState);
+
+    expect(mockedGetCustomerMemory).toHaveBeenCalledExactlyOnceWith("customer-mem");
+  });
+
+  it("3: found memory populates state.customerMemory exactly", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true, conversation: FOUND_CONVERSATION_FOR_MEMORY, messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: SAMPLE_MEMORY });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.customerMemory).toEqual(SAMPLE_MEMORY);
+  });
+
+  it("4: customer not found -> customerMemory stays null, not an error", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true, conversation: FOUND_CONVERSATION_FOR_MEMORY, messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: false });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.customerMemory).toBeNull();
+  });
+
+  it("5: a genuine memory DB/programmer error propagates, not swallowed", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true, conversation: FOUND_CONVERSATION_FOR_MEMORY, messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockRejectedValueOnce(new Error("memory store unreachable"));
+
+    await expect(invokeSalesGraph(initialState)).rejects.toThrow("memory store unreachable");
+  });
+
+  it("6: a non-unknown current conversation language always wins over customer memory", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, language: "darija" },
+      messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({
+      found: true, memory: { ...SAMPLE_MEMORY, preferredLanguage: "french" },
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.language).toBe("darija");
+  });
+
+  it("7: conversation language unknown -> a known, non-unknown customerMemory.preferredLanguage is used as fallback", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, language: "unknown" },
+      messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({
+      found: true, memory: { ...SAMPLE_MEMORY, preferredLanguage: "french" },
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.language).toBe("french");
+  });
+
+  it("8a: conversation language unknown + memory preferredLanguage 'unknown' -> language stays unknown", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, language: "unknown" },
+      messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({
+      found: true, memory: { ...SAMPLE_MEMORY, preferredLanguage: "unknown" },
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.language).toBe("unknown");
+  });
+
+  it("8b: conversation language unknown + memory preferredLanguage null -> language stays unknown", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, language: "unknown" },
+      messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({
+      found: true, memory: { ...SAMPLE_MEMORY, preferredLanguage: null },
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.language).toBe("unknown");
+  });
+
+  it("9: an ordinary new turn re-reads customer memory fresh from PostgreSQL every time, never stale", async () => {
+    mockedLoadConversationContext.mockResolvedValue({
+      found: true, conversation: FOUND_CONVERSATION_FOR_MEMORY, messages: [], cart: null, escalationId: null,
+    });
+    mockedPlanNextActions.mockResolvedValue({ plan: [] });
+
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: SAMPLE_MEMORY });
+    const first = await invokeSalesGraph(initialState);
+
+    const updatedMemory = { ...SAMPLE_MEMORY, totalKnownOrders: 5, recentProducts: ["REF-999"] };
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: updatedMemory });
+    const second = await invokeSalesGraph(initialState);
+
+    expect(mockedGetCustomerMemory).toHaveBeenCalledTimes(2);
+    expect(first.customerMemory).toEqual(SAMPLE_MEMORY);
+    expect(second.customerMemory).toEqual(updatedMemory);
+  });
+
+  it("10: TASK-024 interrupted resume does not replay an already-completed memory lookup", async () => {
+    const threadId = "thread-resume-memory";
+    mockedLoadConversationContext.mockResolvedValue({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, id: "conversation-resume-mem" },
+      messages: [], cart: null, escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: SAMPLE_MEMORY });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK"] });
+    mockedExecuteAction.mockRejectedValueOnce(new Error("transient-executor-failure"));
+
+    await expect(invokeSalesGraph({ ...initialState, threadId })).rejects.toThrow("transient-executor-failure");
+    expect(mockedGetCustomerMemory).toHaveBeenCalledTimes(1);
+
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await resumeInterruptedSalesGraph(threadId);
+
+    // loadContext (and therefore getCustomerMemory) already completed before
+    // the crash and must not be replayed on resume.
+    expect(mockedGetCustomerMemory).toHaveBeenCalledTimes(1);
+    expect(result.customerMemory).toEqual(SAMPLE_MEMORY);
   });
 });
 

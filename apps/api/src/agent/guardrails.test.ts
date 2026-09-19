@@ -16,6 +16,7 @@ const baseState: M3AKState = {
   threadId: "thread-021",
   conversationId: null,
   customerId: null,
+  customerMemory: null,
   messages: [],
   summary: null,
   language: "unknown",

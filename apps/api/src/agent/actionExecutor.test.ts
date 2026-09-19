@@ -49,6 +49,7 @@ const baseState: M3AKState = {
   threadId: "thread-020",
   conversationId: "conversation-020",
   customerId: null,
+  customerMemory: null,
   messages: [],
   summary: null,
   language: "french",
@@ -218,6 +219,88 @@ describe("executeAction — CHECK_DELIVERY", () => {
   });
 });
 
+describe("executeAction — CHECK_DELIVERY customerMemory city fallback (TASK-025)", () => {
+  const SAMPLE_MEMORY = {
+    city: "Marrakech",
+    preferredLanguage: null,
+    totalKnownOrders: 1,
+    latestOrderDate: null,
+    recentProducts: [],
+  };
+
+  it("1: extraction.city present + a different memory.city -> extraction.city wins", async () => {
+    mockedGetDeliveryOptions.mockResolvedValueOnce({
+      found: true,
+      zone: { city: "Casablanca", fee: 25, delayHours: 24, cashOnDelivery: true, storePickup: false },
+      feeCents: 2500,
+    });
+    const state: M3AKState = { ...baseState, customerMemory: SAMPLE_MEMORY };
+
+    await executeAction("CHECK_DELIVERY", state);
+
+    expect(mockedGetDeliveryOptions).toHaveBeenCalledWith("Casablanca");
+  });
+
+  it("2: extraction.city null + memory.city present -> memory city is used for CHECK_DELIVERY", async () => {
+    mockedGetDeliveryOptions.mockResolvedValueOnce({
+      found: true,
+      zone: { city: "Marrakech", fee: 25, delayHours: 24, cashOnDelivery: true, storePickup: false },
+      feeCents: 2500,
+    });
+    const state: M3AKState = {
+      ...baseState,
+      extraction: { ...baseState.extraction, city: null },
+      customerMemory: SAMPLE_MEMORY,
+    };
+
+    const outcome = await executeAction("CHECK_DELIVERY", state);
+
+    expect(mockedGetDeliveryOptions).toHaveBeenCalledWith("Marrakech");
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("3: both extraction.city and customerMemory absent -> existing missing-input behavior unchanged", async () => {
+    const state: M3AKState = {
+      ...baseState,
+      extraction: { ...baseState.extraction, city: null },
+      customerMemory: null,
+    };
+
+    const outcome = await executeAction("CHECK_DELIVERY", state);
+
+    expect(mockedGetDeliveryOptions).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result).toEqual({ reason: "missing_required_input" });
+  });
+
+  it("4: falling back to memory city never mutates state.extraction.city", async () => {
+    mockedGetDeliveryOptions.mockResolvedValueOnce({
+      found: true,
+      zone: { city: "Marrakech", fee: 25, delayHours: 24, cashOnDelivery: true, storePickup: false },
+      feeCents: 2500,
+    });
+    const state: M3AKState = {
+      ...baseState,
+      extraction: { ...baseState.extraction, city: null },
+      customerMemory: SAMPLE_MEMORY,
+    };
+
+    await executeAction("CHECK_DELIVERY", state);
+
+    expect(state.extraction.city).toBeNull();
+  });
+
+  it("5: other actions remain unaffected by a populated customerMemory", async () => {
+    const stateWithMemory: M3AKState = { ...stateWithRef, customerMemory: SAMPLE_MEMORY };
+    mockedGetAvailability.mockResolvedValueOnce({ found: true, ref: "REF-001", stock: 5, available: true });
+
+    const outcome = await executeAction("CHECK_STOCK", stateWithMemory);
+
+    expect(outcome.ok).toBe(true);
+    expect(mockedGetAvailability).toHaveBeenCalledWith("REF-001");
+  });
+});
+
 describe("executeAction — CREATE_CART", () => {
   it("success promotes a real cart snapshot (id, version, items)", async () => {
     mockedCreateCart.mockResolvedValueOnce({
@@ -316,6 +399,20 @@ describe("executeAction — CREATE_ORDER", () => {
     const outcome = await executeAction("CREATE_ORDER", stateWithRef);
     expect(mockedCreateOrder).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
+  });
+
+  it("6 (TASK-025): a null extraction.city is NOT filled in from customerMemory.city — CREATE_ORDER's contract is not broadened", async () => {
+    const stateNoCityWithMemory: M3AKState = {
+      ...stateWithCart,
+      extraction: { ...stateWithCart.extraction, city: null },
+      customerMemory: { city: "Marrakech", preferredLanguage: null, totalKnownOrders: 1, latestOrderDate: null, recentProducts: [] },
+    };
+
+    const outcome = await executeAction("CREATE_ORDER", stateNoCityWithMemory);
+
+    expect(mockedCreateOrder).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result).toEqual({ reason: "missing_required_input" });
   });
 });
 

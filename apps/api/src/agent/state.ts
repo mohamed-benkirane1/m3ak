@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CartSchema, DeliveryZoneSchema, IdSchema, LanguageSchema, MessageSchema, PromotionSchema } from "@m3ak/shared";
+import { CustomerMemorySchema } from "../customer/customerMemory";
 import { ExtractionSchema } from "../llm/extraction";
 
 const TextSchema = z.string().trim().min(1);
@@ -76,6 +77,9 @@ export const M3AKStateObjectSchema = z.object({
   threadId: IdSchema,
   conversationId: IdSchema.nullable(),
   customerId: IdSchema.nullable(),
+  // TASK-025: deterministic PostgreSQL read model, distinct from summary/
+  // extraction/messages — see customerMemory.ts. Never written by the LLM.
+  customerMemory: CustomerMemorySchema.nullable(),
   messages: z.array(StateMessageSchema),
   summary: TextSchema.nullable(),
   language: LanguageSchema,

@@ -15,6 +15,7 @@ const baseState: M3AKState = {
   threadId: "thread-019",
   conversationId: null,
   customerId: null,
+  customerMemory: null,
   messages: [],
   summary: null,
   language: "french",
@@ -196,7 +197,7 @@ describe("planNextActions — no retry (13)", () => {
 });
 
 describe("planNextActions — planner payload contract (14)", () => {
-  it("14: user payload contains EXACTLY language, intent, extraction, executedSteps, lastOutcomeOk, remainingPlan", async () => {
+  it("14: user payload contains EXACTLY language, intent, extraction, executedSteps, lastOutcomeOk, remainingPlan, customerMemory", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
@@ -206,13 +207,55 @@ describe("planNextActions — planner payload contract (14)", () => {
     expect(userMessage?.role).toBe("user");
     const payload = JSON.parse(userMessage?.content ?? "{}") as Record<string, unknown>;
     expect(Object.keys(payload).sort()).toEqual([
-      "executedSteps", "extraction", "intent", "language", "lastOutcomeOk", "remainingPlan",
+      "customerMemory", "executedSteps", "extraction", "intent", "language", "lastOutcomeOk", "remainingPlan",
     ]);
     expect(payload.language).toBe(baseState.language);
     expect(payload.intent).toBe(baseState.intent);
     expect(payload.extraction).toEqual(baseState.extraction);
     expect(payload.executedSteps).toEqual(baseState.executedSteps);
     expect(payload.remainingPlan).toEqual(baseState.activePlan);
+    expect(payload.customerMemory).toEqual(baseState.customerMemory);
+  });
+
+  it("customerMemory-a: null works normally — the payload key is still present, as null", async () => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions({ ...baseState, customerMemory: null });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.customerMemory).toBeNull();
+  });
+
+  it("customerMemory-b: a populated customerMemory is passed through exactly, with only its authorized fields", async () => {
+    resolvePlan(["RESPOND"]);
+    const memory = {
+      city: "Casablanca",
+      preferredLanguage: "darija" as const,
+      totalKnownOrders: 3,
+      latestOrderDate: "2026-08-01T00:00:00.000Z",
+      recentProducts: ["REF-001", "REF-002"],
+    };
+
+    await planNextActions({ ...baseState, customerMemory: memory });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.customerMemory).toEqual(memory);
+    expect(Object.keys(payload.customerMemory as object).sort()).toEqual([
+      "city", "latestOrderDate", "preferredLanguage", "recentProducts", "totalKnownOrders",
+    ]);
+  });
+
+  it("customerMemory-c: the system prompt states customerMemory cannot replace live business checks or explicit confirmation", async () => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions(baseState);
+
+    const systemMessage = mockedReasoningChat.mock.calls[0]?.[0]?.[0];
+    expect(systemMessage?.role).toBe("system");
+    expect(systemMessage?.content).toMatch(/customerMemory/);
+    expect(systemMessage?.content).toMatch(/never substitutes for a real CHECK_STOCK/i);
+    expect(systemMessage?.content).toMatch(/never by itself authorizes CREATE_ORDER/i);
+    expect(systemMessage?.content).toMatch(/never replaces the customer's explicit confirmation/i);
   });
 
   it("14b: no business/internal fields (messages, cart, lastResult, IDs) leak into the payload", async () => {

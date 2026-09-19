@@ -1,5 +1,6 @@
 import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
+import { getCustomerMemory } from "../customer/customerMemory";
 import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
@@ -14,11 +15,37 @@ function noop(_state: M3AKState) {
   return {};
 }
 
+// TASK-025: a current-conversation language (loaded fresh by TASK-023, just
+// below) always wins over durable customer memory. Memory is only a fallback
+// when the conversation's own language is still "unknown" AND the memory's
+// own preferredLanguage is itself a real, known value — a historical
+// preference must never overwrite a fresher signal from the current
+// conversation, and "unknown" memory is not real information either way.
+function resolveLanguage(
+  conversationLanguage: M3AKState["language"],
+  customerMemory: M3AKState["customerMemory"],
+): M3AKState["language"] {
+  if (conversationLanguage !== "unknown") {
+    return conversationLanguage;
+  }
+  if (customerMemory !== null && customerMemory.preferredLanguage !== null && customerMemory.preferredLanguage !== "unknown") {
+    return customerMemory.preferredLanguage;
+  }
+  return conversationLanguage;
+}
+
 // TASK-023: rehydrates an EXISTING conversation found by threadId. Never
 // creates one (conversations.customer_id is NOT NULL and nothing upstream
 // can currently supply a trusted customer identity — TASK-023A §10). Persisted
 // history is prepended to whatever messages this invocation was already
 // given, never dropped.
+//
+// TASK-025: once a conversation (and therefore its customerId, always
+// non-null per the conversations schema) is resolved, a durable customer
+// memory read model is loaded fresh from PostgreSQL every turn — never
+// carried over from a stale checkpoint (TASK-024 full-state-reinvoke
+// semantics already guarantee this). loadConversationContext()/TASK-023's
+// own queries are untouched by this addition.
 async function loadContext(state: M3AKState) {
   const result = await loadConversationContext(state.threadId);
 
@@ -26,10 +53,14 @@ async function loadContext(state: M3AKState) {
     return {};
   }
 
+  const memoryResult = await getCustomerMemory(result.conversation.customerId);
+  const customerMemory = memoryResult.found ? memoryResult.memory : null;
+
   return {
     conversationId: result.conversation.id,
     customerId: result.conversation.customerId,
-    language: result.conversation.language,
+    customerMemory,
+    language: resolveLanguage(result.conversation.language, customerMemory),
     messages: [
       ...result.messages.map((message) => ({ role: message.role, content: message.content })),
       ...state.messages,

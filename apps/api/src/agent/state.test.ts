@@ -5,6 +5,7 @@ const initialState: M3AKState = {
   threadId: "thread-fixture-017",
   conversationId: null,
   customerId: null,
+  customerMemory: null,
   messages: [],
   summary: null,
   language: "unknown",

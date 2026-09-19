@@ -63,6 +63,7 @@ The user message also describes the current planning context:
 - executedSteps: actions already attempted, in order.
 - lastOutcomeOk: true if the most recently attempted action succeeded, false if it did not achieve its intended result, null if nothing has been attempted yet.
 - remainingPlan: the actions still pending from a previous plan, if any. When lastOutcomeOk is false, treat remainingPlan as no longer trustworthy and produce a full replacement plan instead of continuing it.
+- customerMemory: previously known, reliable facts about this returning customer, already loaded from PostgreSQL (or null when none exist). You may use it to avoid re-asking something already known — for example skipping a question about a city that is already known. It is background context only, never live evidence: it never substitutes for a real CHECK_STOCK/CHECK_PROMOTION/CHECK_DELIVERY/pricing/policy check, it never by itself authorizes CREATE_ORDER, and it never replaces the customer's explicit confirmation this turn.
 
 Return ONLY a single raw JSON object, with EXACTLY this key, every time, no more and no fewer:
 
@@ -109,6 +110,11 @@ interface PlannerPayload {
   executedSteps: M3AKState["executedSteps"];
   lastOutcomeOk: boolean | null;
   remainingPlan: M3AKState["activePlan"];
+  // TASK-025: exactly the already-vetted CustomerMemory shape (city,
+  // preferredLanguage, totalKnownOrders, latestOrderDate, recentProducts) —
+  // never a raw order/item row, never a raw message, never PII beyond what
+  // CustomerMemorySchema itself already authorizes.
+  customerMemory: M3AKState["customerMemory"];
 }
 
 // Exactly one reasoningChat call, no retries, no fallback plan, no business-
@@ -123,6 +129,7 @@ export async function planNextActions(state: M3AKState): Promise<{ plan: Allowed
     executedSteps: state.executedSteps,
     lastOutcomeOk: deriveLastOutcomeOk(state.lastResult),
     remainingPlan: state.activePlan,
+    customerMemory: state.customerMemory,
   };
 
   const content = await reasoningChat([

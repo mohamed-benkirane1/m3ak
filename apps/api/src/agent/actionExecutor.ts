@@ -43,6 +43,14 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// TASK-025: current-turn extraction.city always wins; customerMemory.city is
+// a fallback used ONLY to supply this CHECK_DELIVERY lookup's input. It is
+// never written back into extraction and never consumed by CREATE_ORDER,
+// which keeps reading state.extraction.city directly, unchanged.
+function resolveDeliveryCity(state: M3AKState): string | null {
+  return state.extraction.city ?? state.customerMemory?.city ?? null;
+}
+
 function toCartSnapshot(cart: Cart): CartSnapshot {
   return {
     id: cart.id,
@@ -102,8 +110,9 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
     }
 
     case "CHECK_DELIVERY": {
-      if (!state.extraction.city) return missingInput(carriedRef);
-      const result = await getDeliveryOptions(state.extraction.city);
+      const deliveryCity = resolveDeliveryCity(state);
+      if (!deliveryCity) return missingInput(carriedRef);
+      const result = await getDeliveryOptions(deliveryCity);
       return { ok: result.found, result, resolvedRef: carriedRef };
     }
 
