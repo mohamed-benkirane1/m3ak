@@ -1,18 +1,28 @@
-// Infrastructure provisoire (TASK-002) : aucun traitement de job réel n'existe encore.
-// Le worker reste vivant dans son conteneur en attendant BullMQ (tâche ultérieure).
-const HEARTBEAT_INTERVAL_MS = 30_000;
+import { closeFollowupWorker, createFollowupWorker } from "./followupWorker";
 
-console.log("m3ak-worker: démarrage (aucune file de tâches configurée)");
+// TASK-026: replaces the TASK-002 placeholder heartbeat with a real BullMQ
+// Worker bootstrap. No relance business logic runs here yet — see
+// followupWorker.ts's processFollowupJob for the deliberate, explicit
+// TASK-028-not-implemented failure boundary.
+const worker = createFollowupWorker();
 
-const heartbeat = setInterval(() => {
-  console.log("m3ak-worker: en attente (infrastructure provisoire, pas de traitement réel)");
-}, HEARTBEAT_INTERVAL_MS);
+console.log(`m3ak-worker: démarrage, écoute la file "${worker.name}"`);
 
-function shutdown(signal: NodeJS.Signals): void {
+let shuttingDown = false;
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+
   console.log(`m3ak-worker: signal ${signal} reçu, arrêt`);
-  clearInterval(heartbeat);
-  process.exit(0);
+  try {
+    await closeFollowupWorker();
+  } finally {
+    process.exit(0);
+  }
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

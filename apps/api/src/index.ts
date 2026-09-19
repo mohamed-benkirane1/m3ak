@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { closeFollowupQueue } from "./infrastructure/followupQueue";
 import { setupLanggraphCheckpointer } from "./infrastructure/langgraphCheckpointer";
 import { closePostgres } from "./infrastructure/postgres";
 import { closeRedis, connectRedis } from "./infrastructure/redis";
@@ -32,7 +33,10 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   server.log.info(`received ${signal}, shutting down`);
   try {
     await server.close();
-    await Promise.all([closePostgres(), closeRedis()]);
+    // TASK-026: closeFollowupQueue() is a safe no-op when the lazy producer
+    // Queue was never used this process — it is never created merely to be
+    // closed at shutdown.
+    await Promise.all([closePostgres(), closeRedis(), closeFollowupQueue()]);
   } finally {
     process.exit(0);
   }

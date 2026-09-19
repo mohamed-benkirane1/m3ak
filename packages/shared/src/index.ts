@@ -10,3 +10,4 @@ export * from "./schemas/cart";
 export * from "./schemas/order";
 export * from "./schemas/escalation";
 export * from "./schemas/followup";
+export * from "./schemas/followupJob";
