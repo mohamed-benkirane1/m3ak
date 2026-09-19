@@ -334,16 +334,17 @@ describe("planNextActions — planner payload contract (14)", () => {
 });
 
 describe("planNextActions — system prompt contract (15-17)", () => {
-  it("15: system prompt lists all 12 exact allowed action values, including CREATE_CART, UPDATE_CART_ITEM, REMOVE_CART_ITEM", async () => {
+  it("15: system prompt lists all 13 exact allowed action values, including CREATE_CART, UPDATE_CART_ITEM, REMOVE_CART_ITEM, VALIDATE_DISCOUNT", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
 
     const systemContent = mockedReasoningChat.mock.calls[0]?.[0]?.[0]?.content ?? "";
-    expect(AllowedActionSchema.options).toHaveLength(12);
+    expect(AllowedActionSchema.options).toHaveLength(13);
     expect(AllowedActionSchema.options).toContain("CREATE_CART");
     expect(AllowedActionSchema.options).toContain("UPDATE_CART_ITEM");
     expect(AllowedActionSchema.options).toContain("REMOVE_CART_ITEM");
+    expect(AllowedActionSchema.options).toContain("VALIDATE_DISCOUNT");
     for (const action of AllowedActionSchema.options) {
       expect(systemContent).toContain(action);
     }

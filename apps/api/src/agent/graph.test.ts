@@ -163,7 +163,7 @@ const initialState: M3AKState = {
   intent: "unknown",
   extraction: {
     productQuery: null, family: null, color: null, size: null, quantity: null,
-    city: null, address: null, paymentMethod: null, confirmation: null,
+    city: null, address: null, paymentMethod: null, confirmation: null, requestedPriceMad: null,
   },
   cart: null,
   promotion: null,
@@ -205,6 +205,7 @@ const populatedState: M3AKState = {
   extraction: {
     productQuery: "veste", family: "vestes", color: "noir", size: "M", quantity: 2,
     city: "Casablanca", address: "12 rue Exemple", paymentMethod: "cash_on_delivery", confirmation: true,
+    requestedPriceMad: null,
   },
   cart: { id: "cart-020", version: 3, items: [item] },
   promotion: { id: "promotion-020", productRef: "REF-001", promoPrice: 199.95 },
@@ -1396,7 +1397,7 @@ describe("conversation — TASK-P1 real extraction integration", () => {
       ...initialState,
       extraction: {
         productQuery: "veste", family: "vestes", color: "noir", size: null,
-        quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+        quantity: null, city: null, address: null, paymentMethod: null, confirmation: null, requestedPriceMad: null,
       },
       messages: [{ role: "customer", content: "Taille 42 s'il vous plaît." }],
     };
@@ -1472,7 +1473,7 @@ describe("TASK-035 — customer change of mind (AC-03)", () => {
   // extraction and a real cart item (Caftan noir, L) was committed.
   const turn1Extraction = {
     productQuery: "caftan", family: "Caftan", color: "noir", size: "L",
-    quantity: 1, city: null, address: null, paymentMethod: null, confirmation: null,
+    quantity: 1, city: null, address: null, paymentMethod: null, confirmation: null, requestedPriceMad: null,
   };
   const turn1Cart = { id: "cart-035", version: 1, items: [{ productRef: "REF-0066", quantity: 1, unitPrice: 450 }] };
   const stateAfterTurn1: M3AKState = {
@@ -1578,6 +1579,78 @@ describe("TASK-035 — customer change of mind (AC-03)", () => {
     expect(secondPlannerInput.extraction).toEqual(
       expect.objectContaining({ family: "Caftan", color: "noir", size: "M" }),
     );
+  });
+});
+
+describe("TASK-036 — discount negotiation (AC-04)", () => {
+  const stateWithDiscountRequest: M3AKState = {
+    ...initialState,
+    language: "french",
+    intent: "product_search",
+    extraction: { ...initialState.extraction, requestedPriceMad: 100 },
+    messages: [{ role: "customer", content: "Tu peux me le faire à 100 dirhams ?" }],
+  };
+
+  it("a discount below the system's own discretionary limit is never authorized here, and the customer is escalated to a human — never decided by the model", async () => {
+    mockedPlanNextActions
+      // The plan is revised after VALIDATE_DISCOUNT's own negative outcome —
+      // exactly like any other failed step (router.ts's real revision rule).
+      .mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "VALIDATE_DISCOUNT"] })
+      .mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
+      .mockResolvedValueOnce({
+        ok: false,
+        result: {
+          allowed: false, requiresEscalation: true, productRef: "REF-001", basePriceCents: 19995,
+          minimumAllowedPriceCents: 17996, requestedPriceCents: 10000, reason: "discount_exceeds_limit",
+        },
+        resolvedRef: "REF-001",
+      });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true,
+      escalation: { id: "escalation-036", conversationId: "conversation-036", reason: "discount_limit_exceeded", contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z" },
+    });
+
+    const result = await invokeSalesGraph({ ...stateWithDiscountRequest, conversationId: "conversation-036" });
+
+    // The real, deterministic VALIDATE_DISCOUNT answer is what drove the
+    // revised plan straight to ESCALATE — which then takes over the
+    // guardrail decision itself (authorized:null, matching every other
+    // explicit-ESCALATE path in this suite), never inventing a "false".
+    expect(result.authorized).toBeNull();
+    expect(result.humanInterventionNeeded).toBe(true);
+    expect(result.escalationId).toBe("escalation-036");
+    // Once the planner revises to a plain ESCALATE, the escalation node's own
+    // fallback-reason rule applies (matching every other explicit-ESCALATE
+    // path in this suite) — the real VALIDATE_DISCOUNT step still shows up in
+    // the context summary sent to the human, even though the guardrail's own
+    // per-action reason is not the escalation's headline reason here.
+    expect(mockedCreateEscalation).toHaveBeenCalledExactlyOnceWith(
+      "conversation-036", "orchestrator_requested_escalation", expect.stringContaining("VALIDATE_DISCOUNT"),
+    );
+  });
+
+  it("a discount within the system's own limit is authorized and grounds a real response, no escalation", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "VALIDATE_DISCOUNT", "RESPOND"] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          allowed: true, productRef: "REF-001", basePriceCents: 19995,
+          minimumAllowedPriceCents: 17996, requestedPriceCents: 18000, reason: "within_discretionary_limit",
+        },
+        resolvedRef: "REF-001",
+      });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "Ça marche, 180 dirhams." });
+
+    const result = await invokeSalesGraph(stateWithDiscountRequest);
+
+    expect(result.authorized).toBe(true);
+    expect(result.humanInterventionNeeded).toBe(false);
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(result.messages.at(-1)).toEqual({ role: "assistant", content: "Ça marche, 180 dirhams." });
   });
 });
 

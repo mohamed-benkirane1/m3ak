@@ -182,7 +182,7 @@ describe("/ws/chat session and graph integration", () => {
       intent: "unknown",
       extraction: {
         productQuery: null, family: null, color: null, size: null, quantity: null,
-        city: null, address: null, paymentMethod: null, confirmation: null,
+        city: null, address: null, paymentMethod: null, confirmation: null, requestedPriceMad: null,
       },
       cart: null,
       promotion: null,

@@ -245,6 +245,50 @@ describe("generateResponse — durable alternatives snapshot (TASK-034)", () => 
   });
 });
 
+describe("generateResponse — discount evidence (TASK-036)", () => {
+  it("an authorized discount is grounded in real MAD prices converted from the tool's cents", async () => {
+    mockedFastChat.mockResolvedValueOnce("réponse");
+    const state: M3AKState = {
+      ...baseState,
+      lastResult: {
+        action: "VALIDATE_DISCOUNT", ok: true,
+        result: {
+          allowed: true, productRef: "REF-001", basePriceCents: 19995,
+          minimumAllowedPriceCents: 17996, requestedPriceCents: 18000, reason: "within_discretionary_limit",
+        },
+        resolvedRef: "REF-001",
+      },
+    };
+
+    await generateResponse(state);
+
+    expect(capturedUserPayload().observation).toEqual({
+      allowed: true, basePrice: 199.95, minimumAllowedPrice: 179.96, requestedPrice: 180,
+    });
+  });
+
+  it("a discount exceeding the limit never surfaces as authorized, and the internal reason string never leaks", async () => {
+    mockedFastChat.mockResolvedValueOnce("réponse");
+    const state: M3AKState = {
+      ...baseState,
+      lastResult: {
+        action: "VALIDATE_DISCOUNT", ok: false,
+        result: {
+          allowed: false, requiresEscalation: true, productRef: "REF-001", basePriceCents: 19995,
+          minimumAllowedPriceCents: 17996, requestedPriceCents: 10000, reason: "discount_exceeds_limit",
+        },
+        resolvedRef: "REF-001",
+      },
+    };
+
+    await generateResponse(state);
+
+    const payload = capturedUserPayload();
+    expect((payload.observation as { allowed: boolean }).allowed).toBe(false);
+    expect(JSON.stringify(payload)).not.toContain("discount_exceeds_limit");
+  });
+});
+
 describe("generateResponse — restock safety (G)", () => {
   it("G: a restockDate/restockDays/restockAt/expectedRestock key never reaches the payload", async () => {
     mockedFastChat.mockResolvedValueOnce("réponse");

@@ -1,9 +1,10 @@
 import type { Cart } from "@m3ak/shared";
 import { findAlternatives } from "../catalogue/alternatives";
-import { getApplicablePromotion } from "../catalogue/promotions";
+import { getApplicablePromotion, validateDiscount } from "../catalogue/promotions";
 import { getAvailability, getProduct, searchProducts } from "../catalogue/products";
 import { addCartItem, createCart, removeCartItem, updateCartItem } from "../cart/cart";
 import { getDeliveryOptions } from "../delivery/delivery";
+import { madToCentimes } from "../infrastructure/money";
 import { createOrder } from "../order/order";
 import type { AllowedAction } from "./orchestrator";
 import type { M3AKState } from "./state";
@@ -201,6 +202,16 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
         return outcome;
       }
       return { ok: false, result, resolvedRef: carriedRef };
+    }
+
+    // TASK-036 (AC-04): purely a real-truth query — never decides
+    // authorization itself, only asks validateDiscount() and reports its
+    // real answer. requestedPriceMad is transcribed customer text, converted
+    // to cents deterministically (never by the LLM) right before the call.
+    case "VALIDATE_DISCOUNT": {
+      if (!carriedRef || !state.extraction.requestedPriceMad) return missingInput(carriedRef);
+      const result = await validateDiscount(carriedRef, madToCentimes(state.extraction.requestedPriceMad), todayIsoDate());
+      return { ok: result.allowed, result, resolvedRef: carriedRef };
     }
 
     case "CREATE_ORDER": {

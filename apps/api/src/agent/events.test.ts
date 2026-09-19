@@ -34,7 +34,7 @@ describe("public event schemas", () => {
     expect(() => AgentStatusEventSchema.parse({ type: "agent.status", status: "planning", state: {} })).toThrow();
   });
 
-  it("maps all ten executable actions to the exact public tool allowlist", () => {
+  it("maps all eleven executable actions to the exact public tool allowlist", () => {
     expect(PUBLIC_TOOL_BY_ACTION).toEqual({
       SEARCH_PRODUCTS: "searchProducts",
       CHECK_STOCK: "getAvailability",
@@ -45,6 +45,7 @@ describe("public event schemas", () => {
       ADD_TO_CART: "addCartItem",
       UPDATE_CART_ITEM: "updateCartItem",
       REMOVE_CART_ITEM: "removeCartItem",
+      VALIDATE_DISCOUNT: "validateDiscount",
       CREATE_ORDER: "createOrder",
     });
     expect(PUBLIC_TOOL_BY_ACTION).not.toHaveProperty("ESCALATE");

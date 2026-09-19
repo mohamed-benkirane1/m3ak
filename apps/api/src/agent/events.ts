@@ -22,6 +22,7 @@ export const PublicToolNameSchema = z.enum([
   "addCartItem",
   "updateCartItem",
   "removeCartItem",
+  "validateDiscount",
   "createOrder",
 ]);
 
@@ -33,6 +34,8 @@ export const PublicGuardrailCategorySchema = z.enum([
   "unsupported_restock",
   "automation_limit",
   "unverifiable_result",
+  "discount_unverified",
+  "discount_limit_exceeded",
 ]);
 
 export const AgentStatusEventSchema = z
@@ -103,6 +106,7 @@ export const PUBLIC_TOOL_BY_ACTION = {
   ADD_TO_CART: "addCartItem",
   UPDATE_CART_ITEM: "updateCartItem",
   REMOVE_CART_ITEM: "removeCartItem",
+  VALIDATE_DISCOUNT: "validateDiscount",
   CREATE_ORDER: "createOrder",
 } as const satisfies Record<string, PublicToolName>;
 
@@ -116,6 +120,8 @@ const PUBLIC_GUARDRAIL_CATEGORY_BY_REASON = {
   unsupported_restock_claim: "unsupported_restock",
   agent_step_limit_reached: "automation_limit",
   unverifiable_observation: "unverifiable_result",
+  missing_discount_evidence: "discount_unverified",
+  discount_limit_exceeded: "discount_limit_exceeded",
 } as const satisfies Record<string, z.infer<typeof PublicGuardrailCategorySchema>>;
 
 export function createGuardrailEvent(decision: {

@@ -12,7 +12,7 @@ const initialState: M3AKState = {
   intent: "unknown",
   extraction: {
     productQuery: null, family: null, color: null, size: null, quantity: null,
-    city: null, address: null, paymentMethod: null, confirmation: null,
+    city: null, address: null, paymentMethod: null, confirmation: null, requestedPriceMad: null,
   },
   cart: null,
   promotion: null,
@@ -50,6 +50,7 @@ const populatedState = {
   extraction: {
     productQuery: "veste", family: "vestes", color: "noir", size: "M", quantity: 2,
     city: "Casablanca", address: "12 rue Exemple", paymentMethod: "cash_on_delivery", confirmation: true,
+    requestedPriceMad: null,
   },
   cart: { id: "cart-017", version: 3, items: [item] },
   promotion: { id: "promotion-017", productRef: "REF-001", promoPrice: 199.95 },

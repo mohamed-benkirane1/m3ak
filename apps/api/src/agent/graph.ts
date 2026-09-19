@@ -130,6 +130,7 @@ async function conversation(state: M3AKState): Promise<Partial<M3AKState>> {
         address: extracted.address ?? state.extraction.address,
         paymentMethod: extracted.paymentMethod ?? state.extraction.paymentMethod,
         confirmation: extracted.confirmation ?? state.extraction.confirmation,
+        requestedPriceMad: extracted.requestedPriceMad ?? state.extraction.requestedPriceMad,
       },
     };
   } catch (error) {
@@ -174,6 +175,7 @@ const EXECUTABLE_ACTIONS = new Set<string>([
   "ADD_TO_CART",
   "UPDATE_CART_ITEM",
   "REMOVE_CART_ITEM",
+  "VALIDATE_DISCOUNT",
   "CREATE_ORDER",
 ]);
 

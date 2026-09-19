@@ -8,7 +8,9 @@ export type GuardrailReason =
   | "missing_delivery_evidence"
   | "ambiguous_product_reference"
   | "unsupported_restock_claim"
-  | "agent_step_limit_reached";
+  | "agent_step_limit_reached"
+  | "missing_discount_evidence"
+  | "discount_limit_exceeded";
 
 export interface GuardrailDecision {
   authorized: boolean | null;
@@ -33,12 +35,11 @@ const BASE_DECISION: GuardrailDecision = {
   reasons: [],
 };
 
-// Discount protection is structural, not an active check here: validateDiscount()
-// needs a requestedPriceCents argument that has no grounded source anywhere in
-// M3AKState (no orchestrator action produces or carries one), so no lastResult
-// this guardrail ever sees can legitimately represent discount authorization.
-// Nothing below authorizes a discount value; a malformed attempt to smuggle one
-// in fails the ordinary provenance/shape checks like any other bad observation.
+// TASK-036 (AC-04): VALIDATE_DISCOUNT's real, deterministic allowed/
+// requiresEscalation answer is the ONLY thing that can ever authorize a
+// discounted price here — see evaluateValidateDiscount below. A malformed
+// attempt to smuggle a discount value through any other action still fails
+// the ordinary provenance/shape checks like any other bad observation.
 
 // "small defensive recursive-or-shallow-safe scan": lastResult has already
 // passed the outer M3AKStateSchema JSON-safety boundary by the time this runs
@@ -93,6 +94,8 @@ function hasValidResultShape(action: RecognizedObservationAction, result: unknow
       return typeof record.ok === "boolean";
     case "REMOVE_CART_ITEM":
       return typeof record.removed === "boolean";
+    case "VALIDATE_DISCOUNT":
+      return typeof record.allowed === "boolean";
     default:
       return false;
   }
@@ -195,6 +198,29 @@ function evaluateSimpleDeterministic(): Partial<GuardrailDecision> {
   return { authorized: true, reasons: [] };
 }
 
+// TASK-036 (AC-04): the ONLY function anywhere that may authorize a
+// discounted price — driven entirely by validateDiscount()'s own real
+// answer, never by this guardrail inventing a limit itself.
+function evaluateValidateDiscount(result: unknown): Partial<GuardrailDecision> {
+  if (isMissingInputMarker(result)) {
+    return { authorized: false, clarificationNeeded: true, reasons: ["missing_discount_evidence"] };
+  }
+  const record = result as Record<string, unknown>;
+  if (record.allowed === true) {
+    return { authorized: true, reasons: [] };
+  }
+  if (record.requiresEscalation === true) {
+    // The requested price is below the system's own discretionary limit (or
+    // below an already-active promotion) — never the model's call, a human
+    // must decide (spec.md AC-04: "escalader vers un humain").
+    return { authorized: false, humanInterventionNeeded: true, reasons: ["discount_limit_exceeded"] };
+  }
+  // requiresEscalation:false: a clean, non-escalating rejection (the
+  // requested price was above the real base price, or the product itself
+  // could not be found) — an honest "no", no human decision needed.
+  return { authorized: false, reasons: ["missing_discount_evidence"] };
+}
+
 function evaluatePerAction(
   action: RecognizedObservationAction,
   result: unknown,
@@ -217,6 +243,8 @@ function evaluatePerAction(
     case "REMOVE_CART_ITEM":
     case "CREATE_ORDER":
       return evaluateSimpleDeterministic();
+    case "VALIDATE_DISCOUNT":
+      return evaluateValidateDiscount(result);
   }
 }
 

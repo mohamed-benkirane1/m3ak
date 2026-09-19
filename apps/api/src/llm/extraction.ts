@@ -35,6 +35,11 @@ export const ExtractionSchema = z
     address: z.string().trim().min(1).nullable(),
     paymentMethod: PaymentMethodSchema.nullable(),
     confirmation: z.boolean().nullable(),
+    // TASK-036 (AC-04): the price the customer literally asked for, in MAD
+    // (never centimes, never a percentage the LLM would have to compute) —
+    // transcribed as stated, exactly like quantity. Whether it is actually
+    // authorized is decided entirely by the deterministic validateDiscount().
+    requestedPriceMad: z.number().positive().nullable(),
   })
   .strict();
 
@@ -59,7 +64,8 @@ Return ONLY a single raw JSON object, with EXACTLY these keys, every time, no mo
   "city": string | null,
   "address": string | null,
   "paymentMethod": "cash_on_delivery" | "bank_transfer" | "card" | null,
-  "confirmation": true | false | null
+  "confirmation": true | false | null,
+  "requestedPriceMad": number | null
 }
 
 Rules:
@@ -70,6 +76,7 @@ Rules:
 - quantity: a positive integer only if the customer stated one; otherwise null. Never default to 1.
 - paymentMethod: classify only if the customer's wording clearly matches one of the three values; otherwise null.
 - confirmation: true only if the customer explicitly confirms/agrees to proceed; false only if they explicitly refuse/decline/cancel; null if absent or ambiguous.
+- requestedPriceMad: the exact absolute price (in MAD/dirhams) the customer literally asked to pay, only if they stated a specific number — never a percentage, never computed by you, never null-coalesced into any other field. Null if they only asked for "a discount" without naming a price.
 
 Return raw JSON only: no Markdown, no code fences, no explanation, no text before or after the JSON object.`;
 

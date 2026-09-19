@@ -55,6 +55,7 @@ function createFreshState(threadId: string, content: string): M3AKState {
       address: null,
       paymentMethod: null,
       confirmation: null,
+      requestedPriceMad: null,
     },
     cart: null,
     promotion: null,

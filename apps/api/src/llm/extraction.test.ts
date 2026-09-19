@@ -23,6 +23,7 @@ function validExtractionJson(overrides: Record<string, unknown> = {}): Record<st
     address: null,
     paymentMethod: null,
     confirmation: null,
+    requestedPriceMad: null,
     ...overrides,
   };
 }

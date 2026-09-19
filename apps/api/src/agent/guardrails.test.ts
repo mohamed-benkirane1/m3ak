@@ -334,6 +334,59 @@ describe("evaluateCommercialGuardrails — CREATE_CART / ADD_TO_CART / CREATE_OR
     expect(decision.authorized).toBe(true);
   });
 
+  it("TASK-036: VALIDATE_DISCOUNT within the system's discretionary limit is authorized", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({
+        lastResult: {
+          action: "VALIDATE_DISCOUNT", ok: true,
+          result: { allowed: true, productRef: "REF-001", basePriceCents: 19995, minimumAllowedPriceCents: 17996, requestedPriceCents: 18000, reason: "within_discretionary_limit" },
+          resolvedRef: "REF-001",
+        },
+      }),
+    );
+    expect(decision.authorized).toBe(true);
+    expect(decision.humanInterventionNeeded).toBe(false);
+  });
+
+  it("TASK-036: VALIDATE_DISCOUNT exceeding the limit is NEVER authorized and requires human escalation (AC-04)", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({
+        lastResult: {
+          action: "VALIDATE_DISCOUNT", ok: false,
+          result: { allowed: false, requiresEscalation: true, productRef: "REF-001", basePriceCents: 19995, minimumAllowedPriceCents: 17996, requestedPriceCents: 10000, reason: "discount_exceeds_limit" },
+          resolvedRef: "REF-001",
+        },
+      }),
+    );
+    expect(decision.authorized).toBe(false);
+    expect(decision.humanInterventionNeeded).toBe(true);
+    expect(decision.reasons).toContain("discount_limit_exceeded");
+  });
+
+  it("TASK-036: VALIDATE_DISCOUNT above the real base price is a clean rejection — no escalation needed", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({
+        lastResult: {
+          action: "VALIDATE_DISCOUNT", ok: false,
+          result: { allowed: false, requiresEscalation: false, productRef: "REF-001", requestedPriceCents: 25000, reason: "price_above_authoritative_base" },
+          resolvedRef: "REF-001",
+        },
+      }),
+    );
+    expect(decision.authorized).toBe(false);
+    expect(decision.humanInterventionNeeded).toBe(false);
+  });
+
+  it("TASK-036: VALIDATE_DISCOUNT missing input is a clarification, never a silent authorization", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({
+        lastResult: { action: "VALIDATE_DISCOUNT", ok: false, result: { reason: "missing_required_input" }, resolvedRef: null },
+      }),
+    );
+    expect(decision.authorized).toBe(false);
+    expect(decision.clarificationNeeded).toBe(true);
+  });
+
   it("26: CREATE_ORDER success is authorized, orderId untouched here", () => {
     const decision = evaluateCommercialGuardrails(
       withState({ lastResult: { action: "CREATE_ORDER", ok: true, result: { created: true, order: { id: "order-1" } }, resolvedRef: null } }),

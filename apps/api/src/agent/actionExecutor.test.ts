@@ -10,6 +10,7 @@ vi.mock("../catalogue/alternatives", () => ({
 }));
 vi.mock("../catalogue/promotions", () => ({
   getApplicablePromotion: vi.fn(),
+  validateDiscount: vi.fn(),
 }));
 vi.mock("../delivery/delivery", () => ({
   getDeliveryOptions: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock("../order/order", () => ({
 }));
 
 import { findAlternatives } from "../catalogue/alternatives";
-import { getApplicablePromotion } from "../catalogue/promotions";
+import { getApplicablePromotion, validateDiscount } from "../catalogue/promotions";
 import { getAvailability, getProduct, searchProducts } from "../catalogue/products";
 import { addCartItem, createCart, removeCartItem, updateCartItem } from "../cart/cart";
 import { getDeliveryOptions } from "../delivery/delivery";
@@ -38,6 +39,7 @@ const mockedGetAvailability = vi.mocked(getAvailability);
 const mockedGetProduct = vi.mocked(getProduct);
 const mockedFindAlternatives = vi.mocked(findAlternatives);
 const mockedGetApplicablePromotion = vi.mocked(getApplicablePromotion);
+const mockedValidateDiscount = vi.mocked(validateDiscount);
 const mockedGetDeliveryOptions = vi.mocked(getDeliveryOptions);
 const mockedCreateCart = vi.mocked(createCart);
 const mockedAddCartItem = vi.mocked(addCartItem);
@@ -63,6 +65,7 @@ const baseState: M3AKState = {
   extraction: {
     productQuery: "veste", family: "vestes", color: "noir", size: "M", quantity: 2,
     city: "Casablanca", address: null, paymentMethod: "cash_on_delivery", confirmation: true,
+    requestedPriceMad: null,
   },
   cart: null,
   promotion: null,
@@ -285,6 +288,57 @@ describe("executeAction — CHECK_PROMOTION", () => {
   it("missing resolvedRef -> no tool call", async () => {
     await executeAction("CHECK_PROMOTION", baseState);
     expect(mockedGetApplicablePromotion).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeAction — VALIDATE_DISCOUNT (TASK-036)", () => {
+  const stateWithDiscountRequest: M3AKState = {
+    ...stateWithRef,
+    extraction: { ...stateWithRef.extraction, requestedPriceMad: 150 },
+  };
+
+  it("converts the requested MAD price to cents deterministically (never by the LLM) before calling the real tool", async () => {
+    mockedValidateDiscount.mockResolvedValueOnce({
+      allowed: true, productRef: "REF-001", basePriceCents: 19995, minimumAllowedPriceCents: 17996,
+      requestedPriceCents: 15000, reason: "within_discretionary_limit",
+    });
+
+    const outcome = await executeAction("VALIDATE_DISCOUNT", stateWithDiscountRequest);
+
+    expect(mockedValidateDiscount).toHaveBeenCalledWith("REF-001", 15000, expect.stringMatching(ISO_DATE));
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resolvedRef).toBe("REF-001");
+  });
+
+  it("a discount within the system's own limit is a positive outcome", async () => {
+    mockedValidateDiscount.mockResolvedValueOnce({
+      allowed: true, productRef: "REF-001", basePriceCents: 19995, minimumAllowedPriceCents: 17996,
+      requestedPriceCents: 18000, reason: "within_discretionary_limit",
+    });
+    const outcome = await executeAction("VALIDATE_DISCOUNT", stateWithDiscountRequest);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("a discount exceeding the system's limit is a negative outcome requiring escalation — never authorized here", async () => {
+    mockedValidateDiscount.mockResolvedValueOnce({
+      allowed: false, requiresEscalation: true, productRef: "REF-001", basePriceCents: 19995,
+      minimumAllowedPriceCents: 17996, requestedPriceCents: 10000, reason: "discount_exceeds_limit",
+    });
+    const outcome = await executeAction("VALIDATE_DISCOUNT", stateWithDiscountRequest);
+    expect(outcome.ok).toBe(false);
+    expect((outcome.result as { requiresEscalation: boolean }).requiresEscalation).toBe(true);
+  });
+
+  it("missing resolvedRef -> no tool call", async () => {
+    const outcome = await executeAction("VALIDATE_DISCOUNT", { ...baseState, extraction: { ...baseState.extraction, requestedPriceMad: 150 } });
+    expect(mockedValidateDiscount).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("missing requestedPriceMad -> no tool call (never invents a discount request)", async () => {
+    const outcome = await executeAction("VALIDATE_DISCOUNT", stateWithRef);
+    expect(mockedValidateDiscount).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
   });
 });
 
