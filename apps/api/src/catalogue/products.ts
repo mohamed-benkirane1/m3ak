@@ -57,6 +57,41 @@ function escapeLikePattern(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+// TASK-P2: real family taxonomy exactly as stored in `products.family`. Kept as an
+// explicit list rather than a runtime DISTINCT query so canonicalization stays
+// deterministic and adds no extra DB round-trip; update this list if the taxonomy
+// itself changes.
+const CANONICAL_FAMILIES = [
+  "Blouson",
+  "Caftan",
+  "Ceinture",
+  "Chaussures",
+  "Chemise",
+  "Foulard",
+  "Pantalon",
+  "Robe",
+  "Sac à main",
+  "Veste",
+] as const;
+
+// Resolves natural singular/plural variation (e.g. extraction's "vestes" -> the real
+// "Veste") against the canonical taxonomy only — never a blind "strip trailing s",
+// which would corrupt an already-canonical plural like "Chaussures" into "Chaussure".
+// An input already equal to a canonical value (any case) is returned unchanged. An
+// input with no canonical match at all — including a genuinely nonexistent family —
+// is passed through unchanged, so the exact-match query still runs and correctly
+// returns zero rather than being silently rewritten into something invented.
+function canonicalizeFamily(rawFamily: string): string {
+  const normalized = rawFamily.trim().toLowerCase();
+  for (const canonical of CANONICAL_FAMILIES) {
+    const canonicalLower = canonical.toLowerCase();
+    if (normalized === canonicalLower || normalized === `${canonicalLower}s`) {
+      return canonical;
+    }
+  }
+  return rawFamily;
+}
+
 export async function searchProducts(rawInput: unknown): Promise<Product[]> {
   const input = SearchProductsInputSchema.parse(rawInput);
 
@@ -80,7 +115,7 @@ export async function searchProducts(rawInput: unknown): Promise<Product[]> {
   // equality never treats % or _ specially, so no escaping is needed for an exact match.
   if (input.family !== undefined) {
     conditions.push(`lower(family) = lower($${i++})`);
-    params.push(input.family);
+    params.push(canonicalizeFamily(input.family));
   }
   if (input.gender !== undefined) {
     conditions.push(`lower(gender) = lower($${i++})`);

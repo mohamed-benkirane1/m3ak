@@ -114,6 +114,64 @@ describe("searchProducts", () => {
 
     await expect(searchProducts({ ref: "REF-0001" })).rejects.toThrow("connection lost");
   });
+
+  describe("TASK-P2: family canonicalization", () => {
+    it("resolves a natural French plural ('vestes') to the canonical stored singular ('Veste')", async () => {
+      const spy = vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      await searchProducts({ family: "vestes" });
+
+      const [, params] = spy.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual(["Veste"]);
+    });
+
+    it("leaves an already-canonical family ('Veste') unchanged", async () => {
+      const spy = vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      await searchProducts({ family: "Veste" });
+
+      const [, params] = spy.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual(["Veste"]);
+    });
+
+    it("resolves regardless of input casing ('VESTE', 'veste')", async () => {
+      const spy = vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      await searchProducts({ family: "VESTE" });
+      await searchProducts({ family: "veste" });
+
+      const [, firstParams] = spy.mock.calls[0] as [string, unknown[]];
+      const [, secondParams] = spy.mock.calls[1] as [string, unknown[]];
+      expect(firstParams).toEqual(["Veste"]);
+      expect(secondParams).toEqual(["Veste"]);
+    });
+
+    it("never damages an already-canonical plural family ('Chaussures') into a singular that does not exist", async () => {
+      const spy = vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      await searchProducts({ family: "chaussures" });
+
+      const [, params] = spy.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual(["Chaussures"]);
+    });
+
+    it("passes through a family with no canonical match unchanged, so a genuinely nonexistent family still queries as given", async () => {
+      const spy = vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      await searchProducts({ family: "kimono" });
+
+      const [, params] = spy.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual(["kimono"]);
+    });
+
+    it("still returns zero rows for a canonical family with a color that genuinely does not exist for it (dataset truth, not a search defect)", async () => {
+      vi.spyOn(postgresPool, "query").mockResolvedValue({ rows: [] } as never);
+
+      const result = await searchProducts({ family: "vestes", color: "noir" });
+
+      expect(result).toEqual([]);
+    });
+  });
 });
 
 describe("getAvailability", () => {
