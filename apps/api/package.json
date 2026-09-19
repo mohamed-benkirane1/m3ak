@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/websocket": "11.3.0",
     "@langchain/core": "1.2.11",
     "@langchain/langgraph": "1.4.16",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/pg": "^8.23.1",
+    "@types/ws": "8.18.1",
     "node-pg-migrate": "9.0.0",
     "vitest": "4.1.11"
   }

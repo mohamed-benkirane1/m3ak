@@ -1,15 +1,20 @@
 import Fastify from "fastify";
+import websocketPlugin from "@fastify/websocket";
 import { closeFollowupQueue } from "./infrastructure/followupQueue";
 import { setupLanggraphCheckpointer } from "./infrastructure/langgraphCheckpointer";
 import { closePostgres } from "./infrastructure/postgres";
 import { closeRedis, connectRedis } from "./infrastructure/redis";
+import { registerChatRoute } from "./routes/chat";
 import { registerHealthRoute } from "./routes/health";
 
 const server = Fastify({ logger: true });
 
+server.register(websocketPlugin, { options: { maxPayload: 64 * 1024 } });
+
 server.get("/", async () => ({ service: "m3ak-api" }));
 
 registerHealthRoute(server);
+registerChatRoute(server);
 
 const port = Number(process.env.API_PORT ?? 3001);
 
