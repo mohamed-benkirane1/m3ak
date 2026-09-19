@@ -58,6 +58,10 @@ vi.mock("./guardrails", async (importOriginal) => {
   };
 });
 
+vi.mock("./responder", () => ({
+  generateResponse: vi.fn(),
+}));
+
 import { MemorySaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { getCustomerMemory } from "../customer/customerMemory";
@@ -75,6 +79,7 @@ import {
 } from "./graph";
 import { evaluateCommercialGuardrails } from "./guardrails";
 import { OrchestratorError, planNextActions } from "./orchestrator";
+import { generateResponse } from "./responder";
 import type { M3AKState } from "./state";
 
 const mockedPlanNextActions = vi.mocked(planNextActions);
@@ -84,6 +89,7 @@ const mockedEvaluateCommercialGuardrails = vi.mocked(evaluateCommercialGuardrail
 const mockedLoadConversationContext = vi.mocked(loadConversationContext);
 const mockedPersistConversation = vi.mocked(persistConversation);
 const mockedGetCustomerMemory = vi.mocked(getCustomerMemory);
+const mockedGenerateResponse = vi.mocked(generateResponse);
 
 const DEFAULT_PERSISTED_CONVERSATION = {
   id: "default-conversation",
@@ -110,6 +116,11 @@ beforeEach(() => {
   // Safe default for every pre-existing test that never mentions customer
   // memory: no memory found (customerMemory stays null downstream).
   mockedGetCustomerMemory.mockResolvedValue({ found: false });
+  // BLOCKER-R1: safe default for every pre-existing test — no content means
+  // the response node appends nothing, exactly matching this suite's prior
+  // (pre-fix) messages-unchanged expectations for every fixture that never
+  // explicitly opts into a mocked assistant reply.
+  mockedGenerateResponse.mockResolvedValue({ content: null });
 });
 
 afterEach(() => {
@@ -912,20 +923,24 @@ describe("escalation — TASK-022 integration", () => {
     expect(mockedCreateEscalation).not.toHaveBeenCalled();
   });
 
-  it("14/15: response and persist remain no-op even on the escalation path", async () => {
+  it("14/15: BLOCKER-R1 — the escalation path still appends exactly one real assistant message via the responder; persist remains otherwise unaffected", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
     mockedCreateEscalation.mockResolvedValueOnce({ created: true, replayed: false, escalation: fakeEscalation() });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "Votre demande a été transmise à notre équipe." });
 
-    const stateForNoop: M3AKState = {
+    const stateForResponse: M3AKState = {
       ...initialState,
       conversationId: CONVERSATION_ID,
       messages: [{ role: "customer", content: "hello" }],
     };
-    const result = await invokeSalesGraph(stateForNoop);
+    const result = await invokeSalesGraph(stateForResponse);
 
-    expect(result.messages).toEqual(stateForNoop.messages);
-    expect(result.summary).toBe(stateForNoop.summary);
-    expect(result.threadId).toBe(stateForNoop.threadId);
+    expect(result.messages).toEqual([
+      { role: "customer", content: "hello" },
+      { role: "assistant", content: "Votre demande a été transmise à notre équipe." },
+    ]);
+    expect(result.summary).toBe(stateForResponse.summary);
+    expect(result.threadId).toBe(stateForResponse.threadId);
   });
 });
 
@@ -958,7 +973,7 @@ describe("loadContext — TASK-023 integration", () => {
     expect(result.escalationId).toBe("escalation-loaded");
   });
 
-  it("2: persisted messages are prepended to incoming current-invocation messages", async () => {
+  it("2: persisted messages are prepended to incoming current-invocation messages, then the responder's reply is appended at the end", async () => {
     mockedLoadConversationContext.mockResolvedValueOnce({
       found: true,
       conversation: FOUND_CONVERSATION,
@@ -972,6 +987,7 @@ describe("loadContext — TASK-023 integration", () => {
       escalationId: null,
     });
     mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "réponse générée" });
 
     const stateWithIncoming: M3AKState = {
       ...initialState,
@@ -982,6 +998,7 @@ describe("loadContext — TASK-023 integration", () => {
     expect(result.messages).toEqual([
       { role: "customer", content: "old message" },
       { role: "customer", content: "new message this turn" },
+      { role: "assistant", content: "réponse générée" },
     ]);
   });
 
@@ -996,6 +1013,9 @@ describe("loadContext — TASK-023 integration", () => {
     expect(result.language).toBe("unknown");
     expect(result.cart).toBeNull();
     expect(result.escalationId).toBeNull();
+    // BLOCKER-R1: still empty — initialState carries no customer message, so
+    // the (mocked) responder's safe default (content: null) applies and the
+    // response node appends nothing, exactly as before.
     expect(result.messages).toEqual([]);
   });
 
@@ -1259,8 +1279,9 @@ describe("persist — TASK-023 integration", () => {
     expect(mockedPersistConversation.mock.calls[0]?.[2]).toBe(false);
   });
 
-  it("5/6: the exact state language and cumulative messages are passed through", async () => {
+  it("5/6: the exact state language and cumulative messages (including the responder's reply) are passed through", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "réponse générée" });
 
     const stateForPersist: M3AKState = {
       ...initialState, conversationId: "conversation-abc", language: "darija",
@@ -1269,7 +1290,10 @@ describe("persist — TASK-023 integration", () => {
     await invokeSalesGraph(stateForPersist);
 
     expect(mockedPersistConversation.mock.calls[0]?.[1]).toBe("darija");
-    expect(mockedPersistConversation.mock.calls[0]?.[3]).toEqual([{ role: "customer", content: "hello" }]);
+    expect(mockedPersistConversation.mock.calls[0]?.[3]).toEqual([
+      { role: "customer", content: "hello" },
+      { role: "assistant", content: "réponse générée" },
+    ]);
   });
 
   it("7: missing conversationId -> no domain call, controlled skipped lastError", async () => {
@@ -1349,7 +1373,7 @@ describe("persist — TASK-023 integration", () => {
     );
   });
 
-  it("11-15: TASK-020/021/022 behavior, response no-op, and checkpointing remain unaffected", async () => {
+  it("11-15: TASK-020/021/022 behavior and checkpointing remain unaffected by BLOCKER-R1", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"] });
     mockedExecuteAction
       .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
@@ -1361,8 +1385,93 @@ describe("persist — TASK-023 integration", () => {
     expect(result.authorized).toBe(true);
     expect(mockedCreateEscalation).not.toHaveBeenCalled();
     expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
-    // response remains no-op: nothing beyond the loop's own approved fields changed.
+    // BLOCKER-R1: this fixture carries no customer message (initialState),
+    // so the (mocked) responder's safe default (content: null) applies and
+    // nothing is appended — the loop/guardrail/escalation/checkpoint fields
+    // above are what this test actually verifies remain unaffected.
     expect(result.messages).toEqual([]);
+  });
+});
+
+describe("response — BLOCKER-R1 real responder integration", () => {
+  it("a customer message survives to a single appended assistant message, in order, seen by persist, with no duplication", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true, stock: 3 }, resolvedRef: "REF-001" });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "Ce produit est disponible." });
+
+    const state: M3AKState = {
+      ...stateWithRef,
+      conversationId: "conversation-integration",
+      messages: [{ role: "customer", content: "Est-ce que la veste noire est disponible ?" }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    // Exactly one assistant message, appended at the end, existing history
+    // ordered and unchanged.
+    expect(result.messages).toEqual([
+      { role: "customer", content: "Est-ce que la veste noire est disponible ?" },
+      { role: "assistant", content: "Ce produit est disponible." },
+    ]);
+    expect(result.messages.at(-1)).toEqual({ role: "assistant", content: "Ce produit est disponible." });
+    expect(result.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+
+    // Not duplicated: the responder runs exactly once per invocation.
+    expect(mockedGenerateResponse).toHaveBeenCalledTimes(1);
+
+    // persist receives the exact final messages array, including the reply.
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+    expect(mockedPersistConversation.mock.calls[0]?.[3]).toEqual(result.messages);
+  });
+
+  it("a response-generation error patch does not wipe unrelated already-computed state", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true, stock: 3 }, resolvedRef: "REF-001" });
+    mockedGenerateResponse.mockResolvedValueOnce({
+      content: "Je ne suis pas en mesure de vous répondre pour le moment.",
+      lastError: "response_generation_failed: timeout_error",
+    });
+
+    const state: M3AKState = {
+      ...stateWithRef,
+      conversationId: "conversation-integration-2",
+      messages: [{ role: "customer", content: "Bghit veste k7la" }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    expect(result.lastError).toBe("response_generation_failed: timeout_error");
+    // Unrelated already-computed state from earlier nodes survives untouched.
+    expect(result.executedSteps).toEqual(["CHECK_STOCK"]);
+    expect(result.authorized).toBe(true);
+    expect(result.messages).toEqual([
+      { role: "customer", content: "Bghit veste k7la" },
+      { role: "assistant", content: "Je ne suis pas en mesure de vous répondre pour le moment." },
+    ]);
+  });
+
+  it("a successful response never overwrites an already-set prior lastError", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-lasterror-guard", conversationId: "conversation-lasterror-guard",
+        reason: "agent_step_limit_reached", contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "Votre demande a été transmise à notre équipe." });
+
+    const result = await invokeSalesGraph({
+      ...stateWithRef,
+      conversationId: "conversation-lasterror-guard",
+      messages: [{ role: "customer", content: "hello" }],
+    });
+
+    // The step-limit's own lastError is set upstream of response and must
+    // survive a SUCCESSFUL response patch untouched (response never clears
+    // an existing meaningful lastError on success).
+    expect(result.lastError).toBe("agent_step_limit_reached");
+    expect(result.messages.at(-1)).toEqual({ role: "assistant", content: "Votre demande a été transmise à notre équipe." });
   });
 });
 

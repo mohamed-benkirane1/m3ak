@@ -15,6 +15,7 @@ import {
 } from "./events";
 import { evaluateCommercialGuardrails } from "./guardrails";
 import { deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
+import { generateResponse } from "./responder";
 import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state";
 
 // Every TASK-018 node is a structural no-op: it proves graph topology only.
@@ -329,6 +330,29 @@ async function persist(state: M3AKState, activitySink: AgentActivitySink) {
   return {};
 }
 
+// BLOCKER-R1: turns already-computed, guardrail-approved state into a
+// grounded customer-facing assistant message via the responder module. Never
+// executes a tool, never re-derives guardrail authorization — mode/evidence
+// are supplied by generateResponse() reading only already-approved state. A
+// successful response must never blindly clear an existing meaningful
+// lastError (e.g. a failed escalation write): lastError is only patched when
+// the responder itself returns one.
+async function response(state: M3AKState): Promise<Partial<M3AKState>> {
+  const result = await generateResponse(state);
+
+  if (result.content === null) {
+    return result.lastError !== undefined ? { lastError: result.lastError } : {};
+  }
+
+  const patch: Partial<M3AKState> = {
+    messages: [...state.messages, { role: "assistant", content: result.content }],
+  };
+  if (result.lastError !== undefined) {
+    patch.lastError = result.lastError;
+  }
+  return patch;
+}
+
 // Uncompiled builder: topology only, no side effects. compileSalesGraph()
 // compiles this same builder with a checkpointer without touching node/edge
 // wiring (TASK-024).
@@ -352,7 +376,7 @@ export function buildSalesGraph(activitySink: AgentActivitySink = NOOP_AGENT_ACT
     .addNode("tool", (state) => tool(state, activitySink))
     .addNode("guardrail", (state) => guardrail(state, activitySink))
     .addNode("escalation", (state) => escalation(state, activitySink))
-    .addNode("response", noop)
+    .addNode("response", (state) => response(state))
     .addNode("persist", (state) => persist(state, activitySink))
     .addEdge(START, "loadContext")
     .addEdge("loadContext", "conversation")
