@@ -1,0 +1,347 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../catalogue/products", () => ({
+  searchProducts: vi.fn(),
+  getAvailability: vi.fn(),
+}));
+vi.mock("../catalogue/alternatives", () => ({
+  findAlternatives: vi.fn(),
+}));
+vi.mock("../catalogue/promotions", () => ({
+  getApplicablePromotion: vi.fn(),
+}));
+vi.mock("../delivery/delivery", () => ({
+  getDeliveryOptions: vi.fn(),
+}));
+vi.mock("../cart/cart", () => ({
+  createCart: vi.fn(),
+  addCartItem: vi.fn(),
+}));
+vi.mock("../order/order", () => ({
+  createOrder: vi.fn(),
+}));
+
+import { findAlternatives } from "../catalogue/alternatives";
+import { getApplicablePromotion } from "../catalogue/promotions";
+import { getAvailability, searchProducts } from "../catalogue/products";
+import { addCartItem, createCart } from "../cart/cart";
+import { getDeliveryOptions } from "../delivery/delivery";
+import { createOrder } from "../order/order";
+import { executeAction } from "./actionExecutor";
+import type { M3AKState } from "./state";
+
+const mockedSearchProducts = vi.mocked(searchProducts);
+const mockedGetAvailability = vi.mocked(getAvailability);
+const mockedFindAlternatives = vi.mocked(findAlternatives);
+const mockedGetApplicablePromotion = vi.mocked(getApplicablePromotion);
+const mockedGetDeliveryOptions = vi.mocked(getDeliveryOptions);
+const mockedCreateCart = vi.mocked(createCart);
+const mockedAddCartItem = vi.mocked(addCartItem);
+const mockedCreateOrder = vi.mocked(createOrder);
+
+const product = {
+  ref: "REF-001", model: "Veste Hiver", family: "vestes", gender: "homme",
+  color: "noir", size: "M", material: "laine", season: "hiver",
+  price: 199.95, stock: 5, barcode: "000", weight: 800,
+};
+
+const baseState: M3AKState = {
+  threadId: "thread-020",
+  conversationId: "conversation-020",
+  customerId: null,
+  messages: [],
+  summary: null,
+  language: "french",
+  intent: "product_search",
+  extraction: {
+    productQuery: "veste", family: "vestes", color: "noir", size: "M", quantity: 2,
+    city: "Casablanca", address: null, paymentMethod: "cash_on_delivery", confirmation: true,
+  },
+  cart: null,
+  promotion: null,
+  delivery: null,
+  cartTotalCents: null,
+  nextAction: null,
+  activePlan: [],
+  executedSteps: [],
+  iterationCount: 0,
+  lastResult: null,
+  lastError: null,
+  authorized: null,
+  clarificationNeeded: false,
+  humanInterventionNeeded: false,
+  guardrailReasons: [],
+  orderId: null,
+  escalationId: null,
+  followupId: null,
+};
+
+const stateWithRef: M3AKState = {
+  ...baseState,
+  lastResult: { action: "SEARCH_PRODUCTS", ok: true, result: [product], resolvedRef: "REF-001" },
+};
+
+const stateWithCart: M3AKState = {
+  ...stateWithRef,
+  cart: { id: "cart-1", version: 0, items: [] },
+};
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+afterEach(() => {
+  vi.resetAllMocks();
+});
+
+describe("executeAction — SEARCH_PRODUCTS", () => {
+  it("success with exactly one result resolves the ref", async () => {
+    mockedSearchProducts.mockResolvedValueOnce([product]);
+    const outcome = await executeAction("SEARCH_PRODUCTS", baseState);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resolvedRef).toBe("REF-001");
+    expect(outcome.result).toEqual([product]);
+    expect(mockedSearchProducts).toHaveBeenCalledWith({ family: "vestes", color: "noir", size: "M" });
+  });
+
+  it("multiple results leave resolvedRef null, discarding any carried ref", async () => {
+    mockedSearchProducts.mockResolvedValueOnce([product, { ...product, ref: "REF-002" }]);
+    const outcome = await executeAction("SEARCH_PRODUCTS", stateWithRef);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resolvedRef).toBeNull();
+  });
+
+  it("zero results -> ok:false, resolvedRef null", async () => {
+    mockedSearchProducts.mockResolvedValueOnce([]);
+    const outcome = await executeAction("SEARCH_PRODUCTS", baseState);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.resolvedRef).toBeNull();
+  });
+
+  it("missing input (no family/color/size) -> no tool call", async () => {
+    const stateNoCriteria: M3AKState = {
+      ...baseState,
+      extraction: { ...baseState.extraction, family: null, color: null, size: null },
+    };
+    const outcome = await executeAction("SEARCH_PRODUCTS", stateNoCriteria);
+    expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });
+    expect(mockedSearchProducts).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeAction — CHECK_STOCK", () => {
+  it("success carries forward resolvedRef and derives ok from found && available", async () => {
+    mockedGetAvailability.mockResolvedValueOnce({ found: true, ref: "REF-001", stock: 5, available: true });
+    const outcome = await executeAction("CHECK_STOCK", stateWithRef);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resolvedRef).toBe("REF-001");
+    expect(mockedGetAvailability).toHaveBeenCalledWith("REF-001");
+  });
+
+  it("insufficient stock is a business-negative outcome, ref preserved", async () => {
+    mockedGetAvailability.mockResolvedValueOnce({ found: true, ref: "REF-001", stock: 0, available: false });
+    const outcome = await executeAction("CHECK_STOCK", stateWithRef);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.resolvedRef).toBe("REF-001");
+  });
+
+  it("missing resolvedRef -> no tool call", async () => {
+    const outcome = await executeAction("CHECK_STOCK", baseState);
+    expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });
+    expect(mockedGetAvailability).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeAction — FIND_ALTERNATIVES", () => {
+  it("success with alternatives -> ok:true, ref preserved, never auto-switched", async () => {
+    mockedFindAlternatives.mockResolvedValueOnce({ found: true, source: product, alternatives: [{ ...product, ref: "REF-ALT" }] });
+    const outcome = await executeAction("FIND_ALTERNATIVES", stateWithRef);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.resolvedRef).toBe("REF-001");
+  });
+
+  it("no eligible alternatives -> ok:false", async () => {
+    mockedFindAlternatives.mockResolvedValueOnce({ found: true, source: product, alternatives: [] });
+    const outcome = await executeAction("FIND_ALTERNATIVES", stateWithRef);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.resolvedRef).toBe("REF-001");
+  });
+
+  it("missing resolvedRef -> no tool call", async () => {
+    const outcome = await executeAction("FIND_ALTERNATIVES", baseState);
+    expect(mockedFindAlternatives).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — CHECK_PROMOTION", () => {
+  it("success -> ok:true from found, system date supplied", async () => {
+    mockedGetApplicablePromotion.mockResolvedValueOnce({ found: true, product, promotion: null });
+    const outcome = await executeAction("CHECK_PROMOTION", stateWithRef);
+    expect(outcome.ok).toBe(true);
+    expect(mockedGetApplicablePromotion).toHaveBeenCalledWith("REF-001", expect.stringMatching(ISO_DATE));
+  });
+
+  it("product not found -> ok:false", async () => {
+    mockedGetApplicablePromotion.mockResolvedValueOnce({ found: false, reason: "product_not_found", ref: "REF-001" });
+    const outcome = await executeAction("CHECK_PROMOTION", stateWithRef);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("missing resolvedRef -> no tool call", async () => {
+    await executeAction("CHECK_PROMOTION", baseState);
+    expect(mockedGetApplicablePromotion).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeAction — CHECK_DELIVERY", () => {
+  it("success -> ok:true from found, city sourced from extraction", async () => {
+    mockedGetDeliveryOptions.mockResolvedValueOnce({
+      found: true,
+      zone: { city: "Casablanca", fee: 25, delayHours: 24, cashOnDelivery: true, storePickup: false },
+      feeCents: 2500,
+    });
+    const outcome = await executeAction("CHECK_DELIVERY", baseState);
+    expect(outcome.ok).toBe(true);
+    expect(mockedGetDeliveryOptions).toHaveBeenCalledWith("Casablanca");
+  });
+
+  it("city not in delivery grid -> ok:false", async () => {
+    mockedGetDeliveryOptions.mockResolvedValueOnce({ found: false, city: "Casablanca", reason: "city_not_in_delivery_grid" });
+    const outcome = await executeAction("CHECK_DELIVERY", baseState);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("missing city -> no tool call", async () => {
+    const stateNoCity: M3AKState = { ...baseState, extraction: { ...baseState.extraction, city: null } };
+    const outcome = await executeAction("CHECK_DELIVERY", stateNoCity);
+    expect(mockedGetDeliveryOptions).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — CREATE_CART", () => {
+  it("success promotes a real cart snapshot (id, version, items)", async () => {
+    mockedCreateCart.mockResolvedValueOnce({
+      created: true,
+      cart: { id: "cart-1", conversationId: "conversation-020", status: "active", version: 0, items: [] },
+    });
+    const outcome = await executeAction("CREATE_CART", baseState);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.cartPatch).toEqual({ id: "cart-1", version: 0, items: [] });
+    expect(mockedCreateCart).toHaveBeenCalledWith("conversation-020");
+  });
+
+  it("conversation not found -> ok:false, no cartPatch", async () => {
+    mockedCreateCart.mockResolvedValueOnce({ created: false, conversationId: "conversation-020", reason: "conversation_not_found" });
+    const outcome = await executeAction("CREATE_CART", baseState);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.cartPatch).toBeUndefined();
+  });
+
+  it("missing conversationId -> no tool call", async () => {
+    const stateNoConversation: M3AKState = { ...baseState, conversationId: null };
+    const outcome = await executeAction("CREATE_CART", stateNoConversation);
+    expect(mockedCreateCart).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — ADD_TO_CART", () => {
+  it("success promotes the updated cart snapshot", async () => {
+    mockedAddCartItem.mockResolvedValueOnce({
+      ok: true,
+      cart: {
+        id: "cart-1", conversationId: "conversation-020", status: "active", version: 1,
+        items: [{ productRef: "REF-001", quantity: 2, unitPrice: 199.95 }],
+      },
+    });
+    const outcome = await executeAction("ADD_TO_CART", stateWithCart);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.cartPatch).toEqual({ id: "cart-1", version: 1, items: [{ productRef: "REF-001", quantity: 2, unitPrice: 199.95 }] });
+    expect(mockedAddCartItem).toHaveBeenCalledWith("cart-1", "REF-001", 2, expect.stringMatching(ISO_DATE));
+  });
+
+  it("insufficient stock -> ok:false, no cartPatch", async () => {
+    mockedAddCartItem.mockResolvedValueOnce({ ok: false, reason: "insufficient_stock", requestedQuantity: 2, availableStock: 1 });
+    const outcome = await executeAction("ADD_TO_CART", stateWithCart);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.cartPatch).toBeUndefined();
+  });
+
+  it("no cart yet -> no tool call", async () => {
+    const outcome = await executeAction("ADD_TO_CART", stateWithRef);
+    expect(mockedAddCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("missing quantity -> no tool call", async () => {
+    const stateNoQuantity: M3AKState = { ...stateWithCart, extraction: { ...stateWithCart.extraction, quantity: null } };
+    const outcome = await executeAction("ADD_TO_CART", stateNoQuantity);
+    expect(mockedAddCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — CREATE_ORDER", () => {
+  it("success promotes the real order id", async () => {
+    mockedCreateOrder.mockResolvedValueOnce({
+      created: true,
+      replayed: false,
+      order: {
+        id: "order-1", customerId: "customer-1", conversationId: "conversation-020", status: "confirmed",
+        productsTotal: 199.95, deliveryFee: 25, total: 224.95, city: "Casablanca", paymentMethod: "cash_on_delivery",
+        items: [{ productRef: "REF-001", quantity: 2, unitPrice: 199.95 }], createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+    const outcome = await executeAction("CREATE_ORDER", stateWithCart);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.orderId).toBe("order-1");
+    expect(mockedCreateOrder).toHaveBeenCalledWith("cart-1", true, "Casablanca", "cash_on_delivery", expect.stringMatching(ISO_DATE));
+  });
+
+  it("empty cart -> ok:false, no orderId", async () => {
+    mockedCreateOrder.mockResolvedValueOnce({ created: false, reason: "empty_cart" });
+    const outcome = await executeAction("CREATE_ORDER", stateWithCart);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.orderId).toBeUndefined();
+  });
+
+  it("missing confirmation (null, unknown) -> no tool call", async () => {
+    const stateNoConfirmation: M3AKState = { ...stateWithCart, extraction: { ...stateWithCart.extraction, confirmation: null } };
+    const outcome = await executeAction("CREATE_ORDER", stateNoConfirmation);
+    expect(mockedCreateOrder).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("no cart yet -> no tool call", async () => {
+    const outcome = await executeAction("CREATE_ORDER", stateWithRef);
+    expect(mockedCreateOrder).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — terminal actions never dispatch", () => {
+  it("RESPOND throws instead of executing", async () => {
+    await expect(executeAction("RESPOND", baseState)).rejects.toThrow();
+  });
+
+  it("ESCALATE throws instead of executing", async () => {
+    await expect(executeAction("ESCALATE", baseState)).rejects.toThrow();
+  });
+});
+
+describe("executeAction — unexpected errors propagate", () => {
+  it("an unexpected thrown error from the underlying tool is not swallowed", async () => {
+    mockedGetAvailability.mockRejectedValueOnce(new Error("DB connection lost"));
+    await expect(executeAction("CHECK_STOCK", stateWithRef)).rejects.toThrow("DB connection lost");
+  });
+});
+
+describe("executeAction — JSON-safety", () => {
+  it("every outcome is JSON-serializable", async () => {
+    mockedSearchProducts.mockResolvedValueOnce([product]);
+    const outcome = await executeAction("SEARCH_PRODUCTS", baseState);
+    expect(() => JSON.stringify(outcome)).not.toThrow();
+    const roundTripped = JSON.parse(JSON.stringify(outcome)) as unknown;
+    expect(roundTripped).toEqual(JSON.parse(JSON.stringify(outcome)));
+  });
+});

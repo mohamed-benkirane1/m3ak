@@ -90,6 +90,14 @@ describe("planNextActions — valid plans (1-4, 11)", () => {
 
     expect(result.plan).toEqual(["CHECK_STOCK", "RESPOND"]);
   });
+
+  it("accepts a plan containing CREATE_CART", async () => {
+    resolvePlan(["CREATE_CART", "ADD_TO_CART", "CREATE_ORDER"]);
+
+    const result = await planNextActions(baseState);
+
+    expect(result.plan).toEqual(["CREATE_CART", "ADD_TO_CART", "CREATE_ORDER"]);
+  });
 });
 
 describe("planNextActions — malformed/invalid responses (5-7)", () => {
@@ -188,7 +196,7 @@ describe("planNextActions — no retry (13)", () => {
 });
 
 describe("planNextActions — planner payload contract (14)", () => {
-  it("14: user payload contains ONLY language, intent, extraction, executedSteps", async () => {
+  it("14: user payload contains EXACTLY language, intent, extraction, executedSteps, lastOutcomeOk, remainingPlan", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
@@ -197,11 +205,14 @@ describe("planNextActions — planner payload contract (14)", () => {
     const userMessage = messages?.[1];
     expect(userMessage?.role).toBe("user");
     const payload = JSON.parse(userMessage?.content ?? "{}") as Record<string, unknown>;
-    expect(Object.keys(payload).sort()).toEqual(["executedSteps", "extraction", "intent", "language"]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "executedSteps", "extraction", "intent", "language", "lastOutcomeOk", "remainingPlan",
+    ]);
     expect(payload.language).toBe(baseState.language);
     expect(payload.intent).toBe(baseState.intent);
     expect(payload.extraction).toEqual(baseState.extraction);
     expect(payload.executedSteps).toEqual(baseState.executedSteps);
+    expect(payload.remainingPlan).toEqual(baseState.activePlan);
   });
 
   it("14b: no business/internal fields (messages, cart, lastResult, IDs) leak into the payload", async () => {
@@ -216,15 +227,61 @@ describe("planNextActions — planner payload contract (14)", () => {
     expect(userContent).not.toContain("cart");
     expect(userContent).not.toContain("orderId");
   });
+
+  it("14c: lastOutcomeOk is null when lastResult carries no boolean ok", async () => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions({ ...baseState, lastResult: { found: true } });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.lastOutcomeOk).toBeNull();
+  });
+
+  it.each([true, false])("14d: lastOutcomeOk is %s when lastResult.ok is %s", async (ok) => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions({
+      ...baseState,
+      lastResult: { action: "CHECK_STOCK", ok, result: { found: true }, resolvedRef: "REF-001" },
+    });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.lastOutcomeOk).toBe(ok);
+  });
+
+  it("14e: only the redacted lastOutcomeOk boolean is sent — raw business data from lastResult never leaks", async () => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions({
+      ...baseState,
+      lastResult: { action: "CHECK_STOCK", ok: true, result: { found: true, stock: 42, priceCents: 199995 }, resolvedRef: "REF-001" },
+    });
+
+    const userContent = mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "";
+    expect(userContent).not.toContain("42");
+    expect(userContent).not.toContain("199995");
+    expect(userContent).not.toContain("resolvedRef");
+  });
+
+  it("14f: remainingPlan reflects the current activePlan", async () => {
+    resolvePlan(["RESPOND"]);
+
+    await planNextActions({ ...baseState, activePlan: ["CHECK_STOCK", "RESPOND"] });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.remainingPlan).toEqual(["CHECK_STOCK", "RESPOND"]);
+  });
 });
 
 describe("planNextActions — system prompt contract (15-17)", () => {
-  it("15: system prompt lists all 9 exact allowed action values", async () => {
+  it("15: system prompt lists all 10 exact allowed action values, including CREATE_CART", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
 
     const systemContent = mockedReasoningChat.mock.calls[0]?.[0]?.[0]?.content ?? "";
+    expect(AllowedActionSchema.options).toHaveLength(10);
+    expect(AllowedActionSchema.options).toContain("CREATE_CART");
     for (const action of AllowedActionSchema.options) {
       expect(systemContent).toContain(action);
     }
