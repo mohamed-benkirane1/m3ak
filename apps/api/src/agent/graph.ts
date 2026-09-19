@@ -2,6 +2,7 @@ import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/lan
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { getCustomerMemory } from "../customer/customerMemory";
 import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
+import { ExtractionError, extractCustomerRequest } from "../llm/extraction";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
@@ -17,12 +18,6 @@ import { evaluateCommercialGuardrails } from "./guardrails";
 import { deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
 import { generateResponse } from "./responder";
 import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state";
-
-// Every TASK-018 node is a structural no-op: it proves graph topology only.
-// Real node behavior belongs to later tasks (see design.md §7, tasks.md §8-9).
-function noop(_state: M3AKState) {
-  return {};
-}
 
 // TASK-025: a current-conversation language (loaded fresh by TASK-023, just
 // below) always wins over durable customer memory. Memory is only a fallback
@@ -77,6 +72,75 @@ async function loadContext(state: M3AKState) {
     cart: result.cart,
     escalationId: result.escalationId,
   };
+}
+
+// Searches backward rather than trusting the tail: robust even if a stray
+// assistant/merchant message were ever the array's last entry. Mirrors
+// responder.ts's own latestCustomerMessage exactly, but not shared across
+// modules — this stays a small, self-contained helper like the rest of this
+// file's node-local functions.
+function latestCustomerMessage(messages: M3AKState["messages"]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "customer") return message.content;
+  }
+  return null;
+}
+
+// TASK-P1: turns the latest raw customer message into structured
+// intent/extraction/language via the existing TASK-016 extractor, so the
+// planner — whose own payload (orchestrator.ts's PlannerPayload) never
+// carries raw message text — has real search/slot criteria to plan from.
+// Never decides SEARCH_PRODUCTS or any other action itself, never touches
+// activePlan/executedSteps/guardrail state, never mutates messages: that
+// remains planNextActions's and the loop's job entirely.
+//
+// language: the conversation's own already-resolved language (loadContext's
+// resolveLanguage already ran before this node) always wins if it is not
+// "unknown" — a single ambiguous later message must never override an
+// already-established conversation language. Only when it is still
+// "unknown" (a brand-new conversation with no persisted language and no
+// customerMemory fallback) does this turn's own freshly-inferred language
+// get used, exactly mirroring resolveLanguage's own "known beats unknown"
+// precedence one tier further down.
+//
+// extraction: merged, not replaced — a later message that does not restate
+// an earlier slot (e.g. size after color was already given) must not erase
+// what a prior turn already captured (spec.md AC-01: "demander uniquement
+// les informations manquantes").
+async function conversation(state: M3AKState): Promise<Partial<M3AKState>> {
+  const customerMessage = latestCustomerMessage(state.messages);
+  if (customerMessage === null) {
+    return {};
+  }
+
+  try {
+    const extracted = await extractCustomerRequest(customerMessage);
+    return {
+      intent: extracted.intent,
+      language: state.language !== "unknown" ? state.language : extracted.language,
+      extraction: {
+        productQuery: extracted.productQuery ?? state.extraction.productQuery,
+        family: extracted.family ?? state.extraction.family,
+        color: extracted.color ?? state.extraction.color,
+        size: extracted.size ?? state.extraction.size,
+        quantity: extracted.quantity ?? state.extraction.quantity,
+        city: extracted.city ?? state.extraction.city,
+        address: extracted.address ?? state.extraction.address,
+        paymentMethod: extracted.paymentMethod ?? state.extraction.paymentMethod,
+        confirmation: extracted.confirmation ?? state.extraction.confirmation,
+      },
+    };
+  } catch (error) {
+    // Mirrors planFresh's own established convention exactly: only the
+    // expected structural/transport failure classes degrade gracefully into
+    // a bounded lastError (never the raw provider error) — anything else is
+    // a programmer bug and must propagate unchanged.
+    if (error instanceof ExtractionError || error instanceof LlmError) {
+      return { lastError: `conversation_extraction_failed: ${error.category}` };
+    }
+    throw error;
+  }
 }
 
 // Design decision, not an official sourced value (TASK-020A): no config
@@ -365,7 +429,7 @@ export function buildSalesGraph(activitySink: AgentActivitySink = NOOP_AGENT_ACT
       });
       return loadContext(state);
     })
-    .addNode("conversation", noop)
+    .addNode("conversation", (state) => conversation(state))
     .addNode("router", (state) => {
       emitAgentActivity(activitySink, {
         kind: "public",

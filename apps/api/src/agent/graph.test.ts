@@ -62,10 +62,19 @@ vi.mock("./responder", () => ({
   generateResponse: vi.fn(),
 }));
 
+vi.mock("../llm/extraction", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/extraction")>();
+  return {
+    ...actual,
+    extractCustomerRequest: vi.fn(),
+  };
+});
+
 import { MemorySaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { getCustomerMemory } from "../customer/customerMemory";
 import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
+import { extractCustomerRequest } from "../llm/extraction";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
@@ -90,6 +99,7 @@ const mockedLoadConversationContext = vi.mocked(loadConversationContext);
 const mockedPersistConversation = vi.mocked(persistConversation);
 const mockedGetCustomerMemory = vi.mocked(getCustomerMemory);
 const mockedGenerateResponse = vi.mocked(generateResponse);
+const mockedExtractCustomerRequest = vi.mocked(extractCustomerRequest);
 
 const DEFAULT_PERSISTED_CONVERSATION = {
   id: "default-conversation",
@@ -121,6 +131,16 @@ beforeEach(() => {
   // (pre-fix) messages-unchanged expectations for every fixture that never
   // explicitly opts into a mocked assistant reply.
   mockedGenerateResponse.mockResolvedValue({ content: null });
+  // TASK-P1: safe default for every pre-existing test — a rejected
+  // config_error is exactly what real extraction already does in this test
+  // environment (AZURE_OPENAI_* is never configured here), so this default
+  // makes that pre-existing, implicit, env-dependent behavior explicit and
+  // deterministic instead of accidental. The conversation node's own catch
+  // branch turns this into a bounded lastError, which planFresh's success
+  // path (the default for mockedPlanNextActions in most tests) then already
+  // overwrites — exactly matching every pre-existing test's behavior,
+  // unchanged.
+  mockedExtractCustomerRequest.mockRejectedValue(new LlmError("config_error", "extraction not configured for this test"));
 });
 
 afterEach(() => {
@@ -1219,6 +1239,174 @@ describe("loadContext — TASK-025 customer memory integration", () => {
     // the crash and must not be replayed on resume.
     expect(mockedGetCustomerMemory).toHaveBeenCalledTimes(1);
     expect(result.customerMemory).toEqual(SAMPLE_MEMORY);
+  });
+});
+
+describe("conversation — TASK-P1 real extraction integration", () => {
+  const FRENCH_JACKET_EXTRACTION = {
+    language: "french" as const,
+    intent: "product_search",
+    productQuery: "veste",
+    family: "vestes",
+    color: "noir",
+    size: null,
+    quantity: null,
+    city: null,
+    address: null,
+    paymentMethod: null,
+    confirmation: null,
+  };
+
+  it("1: a fresh message reaches the conversation node, which calls the real extractor with it", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce(FRENCH_JACKET_EXTRACTION);
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const state: M3AKState = {
+      ...initialState,
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    await invokeSalesGraph(state);
+
+    expect(mockedExtractCustomerRequest).toHaveBeenCalledExactlyOnceWith("Bonjour, je cherche une veste noire pour femme.");
+  });
+
+  it("2/3: the extracted intent/extraction/language reach planNextActions's own input, and the conversation node never sets activePlan/nextAction itself", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce(FRENCH_JACKET_EXTRACTION);
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS"] })
+      .mockResolvedValueOnce({ plan: [] });
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" });
+
+    const state: M3AKState = {
+      ...initialState,
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    await invokeSalesGraph(state);
+
+    // planNextActions is mocked, so its own call argument IS the exact state
+    // the conversation node produced — proving the populated fields actually
+    // reached the planner's input, not merely the final graph result.
+    const plannerInput = mockedPlanNextActions.mock.calls[0]?.[0] as M3AKState;
+    expect(plannerInput.intent).toBe("product_search");
+    expect(plannerInput.language).toBe("french");
+    expect(plannerInput.extraction).toEqual(
+      expect.objectContaining({ productQuery: "veste", family: "vestes", color: "noir" }),
+    );
+
+    // The conversation node itself never decided anything: activePlan came
+    // entirely from the (mocked) planner, and SEARCH_PRODUCTS was actually
+    // dispatched to the tool node — proving the planner, not the conversation
+    // node, remains the sole decision-maker for the next action.
+    expect(mockedExecuteAction).toHaveBeenCalledExactlyOnceWith("SEARCH_PRODUCTS", expect.anything());
+  });
+
+  it("language: an already-known conversation language always wins over this turn's freshly-inferred one", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({ ...FRENCH_JACKET_EXTRACTION, language: "arabic" });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const state: M3AKState = {
+      ...initialState,
+      language: "darija",
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    expect(result.language).toBe("darija");
+  });
+
+  it("language: a still-unknown conversation language falls back to this turn's freshly-inferred one", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce(FRENCH_JACKET_EXTRACTION);
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const state: M3AKState = {
+      ...initialState,
+      language: "unknown",
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    expect(result.language).toBe("french");
+  });
+
+  it("extraction: a later turn that does not restate an earlier slot merges instead of erasing it", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "product_search", productQuery: null, family: null, color: null,
+      size: "42", quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const state: M3AKState = {
+      ...initialState,
+      extraction: {
+        productQuery: "veste", family: "vestes", color: "noir", size: null,
+        quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+      },
+      messages: [{ role: "customer", content: "Taille 42 s'il vous plaît." }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    expect(result.extraction).toEqual(
+      expect.objectContaining({ productQuery: "veste", family: "vestes", color: "noir", size: "42" }),
+    );
+  });
+
+  it("4: no customer message -> the extractor is never called, state remains safe", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedExtractCustomerRequest).not.toHaveBeenCalled();
+    expect(result.intent).toBe("unknown");
+    expect(result.extraction).toEqual(initialState.extraction);
+  });
+
+  it("an expected LlmError from extraction degrades to a bounded lastError, never a raw provider error", async () => {
+    mockedExtractCustomerRequest.mockRejectedValueOnce(new LlmError("timeout_error", "LLM request timed out after 15000ms — internal detail"));
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const state: M3AKState = {
+      ...initialState,
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    // planFresh's own success path resets lastError, exactly as it already
+    // does for every other node's error in this suite — proving the bounded
+    // category was set and not silently dropped requires observing it before
+    // a subsequent successful planner call overwrites it.
+    expect(mockedPlanNextActions).toHaveBeenCalledTimes(1);
+    const plannerInput = mockedPlanNextActions.mock.calls[0]?.[0] as M3AKState;
+    expect(plannerInput.lastError).toBe("conversation_extraction_failed: timeout_error");
+    expect(JSON.stringify(result)).not.toContain("internal detail");
+  });
+
+  it("an unexpected programmer error from extraction propagates, never swallowed", async () => {
+    mockedExtractCustomerRequest.mockRejectedValueOnce(new TypeError("unexpected programming error"));
+
+    const state: M3AKState = {
+      ...initialState,
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    await expect(invokeSalesGraph(state)).rejects.toThrow("unexpected programming error");
+  });
+
+  it("6: message ordering/persistence behavior is unaffected by the conversation node", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce(FRENCH_JACKET_EXTRACTION);
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "réponse générée" });
+
+    const state: M3AKState = {
+      ...initialState,
+      conversationId: "conversation-p1",
+      messages: [{ role: "customer", content: "Bonjour, je cherche une veste noire pour femme." }],
+    };
+    const result = await invokeSalesGraph(state);
+
+    expect(result.messages).toEqual([
+      { role: "customer", content: "Bonjour, je cherche une veste noire pour femme." },
+      { role: "assistant", content: "réponse générée" },
+    ]);
+    expect(mockedPersistConversation.mock.calls[0]?.[3]).toEqual(result.messages);
   });
 });
 
