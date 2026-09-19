@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   CONNECTION_ERROR_MESSAGE,
   DEMO_PERSONAS,
@@ -14,6 +14,10 @@ import {
   type DemoCustomerRef,
   type TranscriptMessage,
 } from "./chat";
+import { Dashboard } from "./Dashboard.tsx";
+import { buildDashboardApiUrl } from "./dashboard";
+
+type AppView = "simulator" | "dashboard";
 
 const CONNECTION_LABELS: Record<ConnectionState, string> = {
   idle: "À démarrer",
@@ -23,6 +27,7 @@ const CONNECTION_LABELS: Record<ConnectionState, string> = {
 };
 
 function App() {
+  const [view, setView] = useState<AppView>("simulator");
   const [selectedCustomerRef, setSelectedCustomerRef] = useState<DemoCustomerRef | "">("");
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
@@ -40,6 +45,14 @@ function App() {
   const activityStreamRef = useRef<HTMLDivElement | null>(null);
 
   const selectedPersona = DEMO_PERSONAS.find((persona) => persona.customerRef === selectedCustomerRef) ?? null;
+
+  const dashboardApiUrl = useMemo(() => {
+    try {
+      return buildDashboardApiUrl(import.meta.env.VITE_WS_URL, window.location);
+    } catch {
+      return null;
+    }
+  }, []);
 
   function retireActiveSocket(): void {
     socketGenerationRef.current += 1;
@@ -224,7 +237,37 @@ function App() {
       <div className="background-orb background-orb--one" aria-hidden="true" />
       <div className="background-orb background-orb--two" aria-hidden="true" />
 
-      <section className="simulator" aria-label="Simulateur de chat M3AK">
+      <div className="app-view">
+        <nav className="app-nav" aria-label="Navigation M3AK">
+          <span className="app-nav-brand">
+            <span className="brand-mark" aria-hidden="true">M</span>
+            M3AK
+          </span>
+          <div className="app-nav-tabs" role="tablist" aria-label="Vue affichée">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "simulator"}
+              className={`app-nav-tab${view === "simulator" ? " app-nav-tab--active" : ""}`}
+              onClick={() => setView("simulator")}
+            >
+              Simulateur
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "dashboard"}
+              className={`app-nav-tab${view === "dashboard" ? " app-nav-tab--active" : ""}`}
+              onClick={() => setView("dashboard")}
+            >
+              Dashboard
+            </button>
+          </div>
+        </nav>
+
+        {view === "dashboard" ? <Dashboard apiUrl={dashboardApiUrl} /> : null}
+
+      <section className="simulator" aria-label="Simulateur de chat M3AK" hidden={view !== "simulator"}>
         <aside className="setup-panel">
           <div>
             <a className="brand" href="#top" aria-label="M3AK, accueil">
@@ -426,6 +469,7 @@ function App() {
           </div>
         </aside>
       </section>
+      </div>
     </main>
   );
 }

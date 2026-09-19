@@ -5,6 +5,7 @@ import { setupLanggraphCheckpointer } from "./infrastructure/langgraphCheckpoint
 import { closePostgres } from "./infrastructure/postgres";
 import { closeRedis, connectRedis } from "./infrastructure/redis";
 import { registerChatRoute } from "./routes/chat";
+import { registerDashboardRoute } from "./routes/dashboard";
 import { registerHealthRoute } from "./routes/health";
 
 const server = Fastify({ logger: true });
@@ -14,6 +15,7 @@ server.register(websocketPlugin, { options: { maxPayload: 64 * 1024 } });
 server.get("/", async () => ({ service: "m3ak-api" }));
 
 registerHealthRoute(server);
+registerDashboardRoute(server);
 registerChatRoute(server);
 
 const port = Number(process.env.API_PORT ?? 3001);
