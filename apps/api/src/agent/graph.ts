@@ -1,5 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { LlmError } from "../llm/reasoningClient";
+import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
 import { evaluateCommercialGuardrails } from "./guardrails";
 import { type AllowedAction, deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
@@ -163,6 +164,37 @@ function guardrail(state: M3AKState) {
   return patch;
 }
 
+// TASK-022: creates/replays a human escalation exactly when guardrail set
+// humanInterventionNeeded. Reason/summary are derived deterministically from
+// already-safe state fields — no LLM, no re-evaluation of guardrails, no
+// inspection of customer text.
+async function escalation(state: M3AKState) {
+  if (state.conversationId === null) {
+    return { lastError: "escalation_creation_failed: missing_conversation_id" };
+  }
+
+  const reason =
+    state.guardrailReasons.length > 0 ? state.guardrailReasons.join(", ") : "orchestrator_requested_escalation";
+
+  const contextSummary =
+    `intent=${state.intent}; ` +
+    `executedSteps=[${state.executedSteps.join(",")}]; ` +
+    `guardrailReasons=[${state.guardrailReasons.join(",")}]; ` +
+    `lastError=${state.lastError ?? "none"}`;
+
+  const result = await createEscalation(state.conversationId, reason, contextSummary);
+
+  if (!result.created) {
+    return { lastError: `escalation_creation_failed: ${result.reason}` };
+  }
+
+  return { escalationId: result.escalation.id };
+}
+
+function routeAfterGuardrail(state: M3AKState): "escalation" | "response" {
+  return state.humanInterventionNeeded ? "escalation" : "response";
+}
+
 // Uncompiled builder: topology only, no side effects. TASK-024 can compile
 // this same builder with a checkpointer without touching node/edge wiring.
 export function buildSalesGraph() {
@@ -172,6 +204,7 @@ export function buildSalesGraph() {
     .addNode("router", router)
     .addNode("tool", tool)
     .addNode("guardrail", guardrail)
+    .addNode("escalation", escalation)
     .addNode("response", noop)
     .addNode("persist", noop)
     .addEdge(START, "loadContext")
@@ -179,7 +212,8 @@ export function buildSalesGraph() {
     .addEdge("conversation", "router")
     .addConditionalEdges("router", routeAfterRouter, { tool: "tool", guardrail: "guardrail" })
     .addEdge("tool", "router")
-    .addEdge("guardrail", "response")
+    .addConditionalEdges("guardrail", routeAfterGuardrail, { escalation: "escalation", response: "response" })
+    .addEdge("escalation", "response")
     .addEdge("response", "persist")
     .addEdge("persist", END);
 }

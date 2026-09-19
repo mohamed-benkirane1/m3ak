@@ -12,14 +12,35 @@ vi.mock("./actionExecutor", () => ({
   executeAction: vi.fn(),
 }));
 
+vi.mock("../escalation/escalation", () => ({
+  createEscalation: vi.fn(),
+}));
+
+// Partial mock: defaults to the REAL guardrail logic (via vi.fn(actual...)) so
+// every existing TASK-021 integration test keeps exercising real behavior;
+// only the one test that needs to prove escalation's own join-logic in
+// isolation overrides it with mockReturnValueOnce (TASK-022A §28 explicitly
+// allows selective mocking here).
+vi.mock("./guardrails", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./guardrails")>();
+  return {
+    ...actual,
+    evaluateCommercialGuardrails: vi.fn(actual.evaluateCommercialGuardrails),
+  };
+});
+
 import { LlmError } from "../llm/reasoningClient";
+import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
 import { buildSalesGraph, compileSalesGraph, invokeSalesGraph } from "./graph";
+import { evaluateCommercialGuardrails } from "./guardrails";
 import { OrchestratorError, planNextActions } from "./orchestrator";
 import type { M3AKState } from "./state";
 
 const mockedPlanNextActions = vi.mocked(planNextActions);
 const mockedExecuteAction = vi.mocked(executeAction);
+const mockedCreateEscalation = vi.mocked(createEscalation);
+const mockedEvaluateCommercialGuardrails = vi.mocked(evaluateCommercialGuardrails);
 
 let originalMaxAgentSteps: string | undefined;
 
@@ -108,7 +129,7 @@ const populatedState: M3AKState = {
 };
 
 const EXPECTED_NODE_NAMES = [
-  "__start__", "loadContext", "conversation", "router", "tool", "guardrail", "response", "persist", "__end__",
+  "__start__", "loadContext", "conversation", "router", "tool", "guardrail", "escalation", "response", "persist", "__end__",
 ];
 
 describe("buildSalesGraph / compileSalesGraph", () => {
@@ -144,7 +165,7 @@ describe("graph topology — loop-shaped after TASK-020", () => {
     expect(edges).not.toContain("tool->guardrail");
   });
 
-  it("keeps the fixed prefix and suffix edges unchanged", async () => {
+  it("keeps the fixed prefix edges unchanged", async () => {
     const compiled = compileSalesGraph();
     const drawable = await compiled.getGraphAsync();
     const edges = drawable.edges.map((edge) => `${edge.source}->${edge.target}`);
@@ -152,7 +173,16 @@ describe("graph topology — loop-shaped after TASK-020", () => {
     expect(edges).toContain("__start__->loadContext");
     expect(edges).toContain("loadContext->conversation");
     expect(edges).toContain("conversation->router");
+  });
+
+  it("wires guardrail->escalation, guardrail->response, escalation->response, response->persist, persist->END", async () => {
+    const compiled = compileSalesGraph();
+    const drawable = await compiled.getGraphAsync();
+    const edges = drawable.edges.map((edge) => `${edge.source}->${edge.target}`);
+
+    expect(edges).toContain("guardrail->escalation");
     expect(edges).toContain("guardrail->response");
+    expect(edges).toContain("escalation->response");
     expect(edges).toContain("response->persist");
     expect(edges).toContain("persist->__end__");
   });
@@ -262,8 +292,18 @@ describe("loop — MAX_AGENT_STEPS (13, 14)", () => {
     process.env.MAX_AGENT_STEPS = "2";
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK"] });
     mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    // The step limit sets humanInterventionNeeded:true, which now routes
+    // through the (mocked) TASK-022 escalation node before reaching guardrail's
+    // downstream state — a successful escalation never touches lastError.
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-step-limit", conversationId: "conversation-abc", reason: "agent_step_limit_reached",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
 
-    const result = await invokeSalesGraph(stateWithRef);
+    const result = await invokeSalesGraph({ ...stateWithRef, conversationId: "conversation-abc" });
 
     expect(mockedExecuteAction).toHaveBeenCalledTimes(2);
     expect(mockedPlanNextActions).toHaveBeenCalledTimes(1);
@@ -271,6 +311,7 @@ describe("loop — MAX_AGENT_STEPS (13, 14)", () => {
     expect(result.nextAction).toBeNull();
     expect(result.lastError).toBe("agent_step_limit_reached");
     expect(result.activePlan).toEqual(["CHECK_STOCK"]);
+    expect(result.escalationId).toBe("escalation-step-limit");
   });
 
   it("defaults to 6 when MAX_AGENT_STEPS is unset", async () => {
@@ -279,8 +320,15 @@ describe("loop — MAX_AGENT_STEPS (13, 14)", () => {
       plan: ["CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK", "CHECK_STOCK"],
     });
     mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-default-limit", conversationId: "conversation-abc", reason: "agent_step_limit_reached",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
 
-    const result = await invokeSalesGraph(stateWithRef);
+    const result = await invokeSalesGraph({ ...stateWithRef, conversationId: "conversation-abc" });
 
     expect(mockedExecuteAction).toHaveBeenCalledTimes(6);
     expect(result.lastError).toBe("agent_step_limit_reached");
@@ -518,6 +566,184 @@ describe("guardrail — TASK-021 integration (real evaluateCommercialGuardrails,
 
     expect(result.escalationId).toBeNull();
     expect(result.followupId).toBeNull();
+  });
+});
+
+describe("escalation — TASK-022 integration", () => {
+  const CONVERSATION_ID = "conversation-abc";
+
+  function fakeEscalation(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "escalation-1",
+      conversationId: CONVERSATION_ID,
+      reason: "orchestrator_requested_escalation",
+      contextSummary: "intent=unknown; executedSteps=[]; guardrailReasons=[]; lastError=none",
+      status: "open" as const,
+      createdAt: "2026-09-19T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("1: no human intervention -> createEscalation is never called", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+
+    await invokeSalesGraph(stateWithRef);
+
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+  });
+
+  it("2: explicit ESCALATE calls createEscalation once with the fallback reason", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({ created: true, replayed: false, escalation: fakeEscalation() });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID });
+
+    expect(mockedCreateEscalation).toHaveBeenCalledTimes(1);
+    expect(mockedCreateEscalation.mock.calls[0]?.[1]).toBe("orchestrator_requested_escalation");
+    expect(result.escalationId).toBe("escalation-1");
+  });
+
+  it("3: a malformed observation produces reason 'unverifiable_observation'", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false, escalation: fakeEscalation({ reason: "unverifiable_observation" }),
+    });
+
+    const stateWithMalformed = { ...initialState, conversationId: CONVERSATION_ID, lastResult: "not-an-object" as never };
+    await invokeSalesGraph(stateWithMalformed);
+
+    expect(mockedCreateEscalation.mock.calls[0]?.[1]).toBe("unverifiable_observation");
+  });
+
+  it("4: agent step limit produces reason 'agent_step_limit_reached'", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false, escalation: fakeEscalation({ reason: "agent_step_limit_reached" }),
+    });
+
+    await invokeSalesGraph({ ...stateWithRef, conversationId: CONVERSATION_ID });
+
+    expect(mockedCreateEscalation.mock.calls[0]?.[1]).toBe("agent_step_limit_reached");
+  });
+
+  it("5: successful new creation lands the real escalation ID in state.escalationId", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false, escalation: fakeEscalation({ id: "real-escalation-id" }),
+    });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID });
+
+    expect(result.escalationId).toBe("real-escalation-id");
+  });
+
+  it("6: a replayed existing escalation lands the same real ID, with no special duplicate state", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: true, escalation: fakeEscalation({ id: "existing-escalation-id" }),
+    });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID });
+
+    expect(result.escalationId).toBe("existing-escalation-id");
+  });
+
+  it("7: conversationId null -> createEscalation never called, escalationId stays null, exact lastError", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+
+    const result = await invokeSalesGraph(initialState); // conversationId: null
+
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(result.escalationId).toBeNull();
+    expect(result.lastError).toBe("escalation_creation_failed: missing_conversation_id");
+  });
+
+  it("8: conversation_not_found -> escalationId stays null, controlled lastError", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({ created: false, reason: "conversation_not_found" });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID });
+
+    expect(result.escalationId).toBeNull();
+    expect(result.lastError).toBe("escalation_creation_failed: conversation_not_found");
+  });
+
+  it("9: an unexpected createEscalation throw rejects invokeSalesGraph, not swallowed", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await expect(invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID })).rejects.toThrow("DB connection lost");
+  });
+
+  it("10: the deterministic context summary exactly matches the contract", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({ created: true, replayed: false, escalation: fakeEscalation() });
+
+    const stateForSummary: M3AKState = {
+      ...initialState,
+      conversationId: CONVERSATION_ID,
+      intent: "product_search",
+      executedSteps: ["SEARCH_PRODUCTS", "CHECK_STOCK"],
+      guardrailReasons: [],
+      lastError: null,
+    };
+    await invokeSalesGraph(stateForSummary);
+
+    expect(mockedCreateEscalation.mock.calls[0]?.[2]).toBe(
+      "intent=product_search; executedSteps=[SEARCH_PRODUCTS,CHECK_STOCK]; guardrailReasons=[]; lastError=none",
+    );
+  });
+
+  it("11: multiple guardrail reasons are joined with ', '", async () => {
+    // Real evaluateCommercialGuardrails never currently produces >1 reason
+    // alongside humanInterventionNeeded:true — this proves the escalation
+    // node's own join logic in isolation (TASK-022A §28 explicitly allows
+    // selective guardrail mocking for exactly this case).
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedEvaluateCommercialGuardrails.mockReturnValueOnce({
+      authorized: false, clarificationNeeded: false, humanInterventionNeeded: true,
+      reasons: ["missing_stock_evidence", "unsupported_restock_claim"],
+    });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: fakeEscalation({ reason: "missing_stock_evidence, unsupported_restock_claim" }),
+    });
+
+    await invokeSalesGraph({ ...initialState, conversationId: CONVERSATION_ID });
+
+    expect(mockedCreateEscalation.mock.calls[0]?.[1]).toBe("missing_stock_evidence, unsupported_restock_claim");
+  });
+
+  it("12/13: TASK-020 loop and TASK-021 guardrail behavior are unaffected by escalation wiring", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
+      .mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.executedSteps).toEqual(["SEARCH_PRODUCTS", "CHECK_STOCK"]);
+    expect(result.authorized).toBe(true);
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+  });
+
+  it("14/15: response and persist remain no-op even on the escalation path", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({ created: true, replayed: false, escalation: fakeEscalation() });
+
+    const stateForNoop: M3AKState = {
+      ...initialState,
+      conversationId: CONVERSATION_ID,
+      messages: [{ role: "customer", content: "hello" }],
+    };
+    const result = await invokeSalesGraph(stateForNoop);
+
+    expect(result.messages).toEqual(stateForNoop.messages);
+    expect(result.summary).toBe(stateForNoop.summary);
+    expect(result.threadId).toBe(stateForNoop.threadId);
   });
 });
 
