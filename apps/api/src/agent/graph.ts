@@ -1,6 +1,7 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { LlmError } from "../llm/reasoningClient";
 import { executeAction } from "./actionExecutor";
+import { evaluateCommercialGuardrails } from "./guardrails";
 import { type AllowedAction, deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
 import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state";
 
@@ -139,6 +140,29 @@ async function tool(state: M3AKState) {
   return patch;
 }
 
+// TASK-021: reads the loop's final observation and writes only the four
+// guardrail state fields (plus the narrowly-scoped promotion/delivery
+// patches) — never touches activePlan/nextAction/executedSteps/etc.
+function guardrail(state: M3AKState) {
+  const decision = evaluateCommercialGuardrails(state);
+
+  const patch: Partial<M3AKState> = {
+    authorized: decision.authorized,
+    clarificationNeeded: decision.clarificationNeeded,
+    humanInterventionNeeded: decision.humanInterventionNeeded,
+    guardrailReasons: decision.reasons,
+  };
+
+  if ("promotionPatch" in decision) {
+    patch.promotion = decision.promotionPatch;
+  }
+  if ("deliveryPatch" in decision) {
+    patch.delivery = decision.deliveryPatch;
+  }
+
+  return patch;
+}
+
 // Uncompiled builder: topology only, no side effects. TASK-024 can compile
 // this same builder with a checkpointer without touching node/edge wiring.
 export function buildSalesGraph() {
@@ -147,7 +171,7 @@ export function buildSalesGraph() {
     .addNode("conversation", noop)
     .addNode("router", router)
     .addNode("tool", tool)
-    .addNode("guardrail", noop)
+    .addNode("guardrail", guardrail)
     .addNode("response", noop)
     .addNode("persist", noop)
     .addEdge(START, "loadContext")

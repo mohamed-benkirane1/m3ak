@@ -374,19 +374,150 @@ describe("loop — approved state patches survive the graph merge (18, 19)", () 
   });
 });
 
-describe("loop — TASK-021 guardrail fields remain untouched (20)", () => {
-  it("leaves authorized/clarificationNeeded/humanInterventionNeeded/guardrailReasons untouched through a real loop iteration", async () => {
+describe("loop — fields outside the guardrail's write scope remain untouched (20)", () => {
+  it("guardrail never writes activePlan/nextAction/executedSteps/iterationCount/lastResult/cart/orderId/escalationId/followupId", async () => {
+    // activePlan/nextAction start empty so router calls the (mocked) planner
+    // instead of deterministically continuing populatedState's own preset
+    // plan — this isolates guardrail's effect from the loop's own mechanics.
+    const stateAtGuardrail: M3AKState = { ...populatedState, activePlan: [], nextAction: null };
     mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
-    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true }, resolvedRef: "REF-001" });
 
-    const result = await invokeSalesGraph(populatedState);
+    const result = await invokeSalesGraph(stateAtGuardrail);
 
-    expect(result.authorized).toBe(populatedState.authorized);
-    expect(result.clarificationNeeded).toBe(populatedState.clarificationNeeded);
-    expect(result.humanInterventionNeeded).toBe(populatedState.humanInterventionNeeded);
-    expect(result.guardrailReasons).toEqual(populatedState.guardrailReasons);
-    expect(result.escalationId).toBe(populatedState.escalationId);
-    expect(result.followupId).toBe(populatedState.followupId);
+    expect(result.executedSteps).toEqual(stateAtGuardrail.executedSteps);
+    expect(result.iterationCount).toBe(stateAtGuardrail.iterationCount);
+    expect(result.lastResult).toEqual(stateAtGuardrail.lastResult);
+    expect(result.cart).toEqual(stateAtGuardrail.cart);
+    expect(result.orderId).toBe(stateAtGuardrail.orderId);
+    expect(result.escalationId).toBe(stateAtGuardrail.escalationId);
+    expect(result.followupId).toBe(stateAtGuardrail.followupId);
+    expect(mockedExecuteAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("guardrail — TASK-021 integration (real evaluateCommercialGuardrails, no mocking)", () => {
+  it("1: a verified observation reaches the final state with authorized:true, correct reasons, flags false", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true, stock: 5 }, resolvedRef: "REF-001" });
+
+    const result = await invokeSalesGraph(stateWithRef);
+
+    expect(result.authorized).toBe(true);
+    expect(result.clarificationNeeded).toBe(false);
+    expect(result.humanInterventionNeeded).toBe(false);
+    expect(result.guardrailReasons).toEqual([]);
+  });
+
+  it("2: unknown delivery city yields authorized:false, clarificationNeeded:true, with a reason", async () => {
+    // CHECK_DELIVERY's ok:false triggers TASK-020's own revision mechanism,
+    // so a second planner call happens before the loop reaches guardrail.
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["CHECK_DELIVERY"] })
+      .mockResolvedValueOnce({ plan: ["RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: false, result: { found: false, city: "Nowhere", reason: "city_not_in_delivery_grid" }, resolvedRef: null,
+    });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.authorized).toBe(false);
+    expect(result.clarificationNeeded).toBe(true);
+    expect(result.guardrailReasons).toEqual(["missing_delivery_evidence"]);
+  });
+
+  it("3: a malformed observation yields authorized:false and humanInterventionNeeded:true", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const stateWithMalformedResult = { ...initialState, lastResult: "not-an-object" as never };
+    const result = await invokeSalesGraph(stateWithMalformedResult);
+
+    expect(result.authorized).toBe(false);
+    expect(result.humanInterventionNeeded).toBe(true);
+    expect(result.guardrailReasons).toEqual(["unverifiable_observation"]);
+    expect(mockedExecuteAction).not.toHaveBeenCalled();
+  });
+
+  it("4: ESCALATE sets humanInterventionNeeded:true without ever calling executeAction", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedExecuteAction).not.toHaveBeenCalled();
+    expect(result.humanInterventionNeeded).toBe(true);
+    expect(result.authorized).toBeNull();
+  });
+
+  it("5: step limit yields authorized:false, humanInterventionNeeded:true, reason agent_step_limit_reached", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+
+    const result = await invokeSalesGraph(stateWithRef);
+
+    expect(result.authorized).toBe(false);
+    expect(result.humanInterventionNeeded).toBe(true);
+    expect(result.guardrailReasons).toEqual(["agent_step_limit_reached"]);
+  });
+
+  it("6: a verified promotion patch survives the graph merge", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_PROMOTION", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true,
+      result: { found: true, product: { ref: "REF-001" }, promotion: { id: "promo-1", productRef: "REF-001", promoPrice: 149.99 } },
+      resolvedRef: "REF-001",
+    });
+
+    const result = await invokeSalesGraph(stateWithRef);
+
+    expect(result.promotion).toEqual({ id: "promo-1", productRef: "REF-001", promoPrice: 149.99 });
+  });
+
+  it("7: a verified NO-promotion patch explicitly sets state.promotion to null, overriding a prior value", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_PROMOTION", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true, result: { found: true, product: { ref: "REF-001" }, promotion: null }, resolvedRef: "REF-001",
+    });
+
+    const startingState: M3AKState = { ...stateWithRef, promotion: { id: "old-promo", productRef: "REF-001", promoPrice: 999 } };
+    const result = await invokeSalesGraph(startingState);
+
+    expect(result.promotion).toBeNull();
+  });
+
+  it("8: a verified delivery patch survives the graph merge", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_DELIVERY", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true,
+      result: { found: true, zone: { city: "Casablanca", fee: 25, delayHours: 24, cashOnDelivery: true, storePickup: false }, feeCents: 2500 },
+      resolvedRef: null,
+    });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.delivery).toEqual({ city: "Casablanca", feeCents: 2500, delayHours: 24, cashOnDelivery: true, storePickup: false });
+  });
+
+  it("9: TASK-020 router/tool loop mechanics are unaffected by a real guardrail", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
+      .mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedPlanNextActions).toHaveBeenCalledTimes(1);
+    expect(mockedExecuteAction).toHaveBeenCalledTimes(2);
+    expect(result.executedSteps).toEqual(["SEARCH_PRODUCTS", "CHECK_STOCK"]);
+    expect(result.iterationCount).toBe(2);
+  });
+
+  it("10: no escalation record or persistence side effect occurs (state-only signal)", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.escalationId).toBeNull();
+    expect(result.followupId).toBeNull();
   });
 });
 
