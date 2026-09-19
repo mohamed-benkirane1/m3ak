@@ -65,7 +65,14 @@ import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
-import { buildSalesGraph, compileSalesGraph, invokeSalesGraph, resumeInterruptedSalesGraph } from "./graph";
+import { toDurableAgentEventRecords, type SanitizedAgentActivity } from "./events";
+import {
+  buildSalesGraph,
+  compileSalesGraph,
+  invokeSalesGraph,
+  invokeSalesGraphWithEvents,
+  resumeInterruptedSalesGraph,
+} from "./graph";
 import { evaluateCommercialGuardrails } from "./guardrails";
 import { OrchestratorError, planNextActions } from "./orchestrator";
 import type { M3AKState } from "./state";
@@ -1381,5 +1388,185 @@ describe("invokeSalesGraph — outer JSON-safety boundary preserved (21)", () =>
     const stateWithCyclicResult = { ...initialState, lastResult: cyclic };
     await expect(invokeSalesGraph(stateWithCyclicResult)).rejects.toThrow();
     expect(mockedPlanNextActions).not.toHaveBeenCalled();
+  });
+});
+
+describe("invokeSalesGraphWithEvents — TASK-030 sanitized instrumentation", () => {
+  function activityCollector() {
+    const activities: SanitizedAgentActivity[] = [];
+    return { activities, sink: (activity: SanitizedAgentActivity) => activities.push(activity) };
+  }
+
+  it("emits loading_context and planning only when those real nodes execute", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    const { activities, sink } = activityCollector();
+
+    await invokeSalesGraphWithEvents({ ...initialState, threadId: "events-status-nodes" }, sink);
+
+    const statuses = activities.flatMap((activity) =>
+      activity.kind === "public" && activity.event.type === "agent.status" ? [activity.event.status] : [],
+    );
+    expect(statuses).toEqual(["loading_context", "planning"]);
+    expect(statuses).not.toContain("understanding_request");
+    expect(statuses).not.toContain("preparing_response");
+  });
+
+  it.each([
+    [true, "positive"],
+    [false, "negative"],
+  ] as const)("tool emits started before execution and completed %s after its typed return", async (ok, outcome) => {
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["CHECK_STOCK"] })
+      .mockResolvedValueOnce({ plan: [] });
+    const { activities, sink } = activityCollector();
+    mockedExecuteAction.mockImplementationOnce(async () => {
+      expect(activities.at(-1)).toEqual({
+        kind: "public",
+        event: { type: "agent.tool", tool: "getAvailability", status: "started" },
+      });
+      return { ok, result: { found: ok, available: ok }, resolvedRef: "REF-001" };
+    });
+
+    await invokeSalesGraphWithEvents({ ...stateWithRef, threadId: `events-tool-${outcome}` }, sink);
+
+    const toolEvents = activities.flatMap((activity) =>
+      activity.kind === "public" && activity.event.type === "agent.tool" ? [activity.event] : [],
+    );
+    expect(toolEvents).toEqual([
+      { type: "agent.tool", tool: "getAvailability", status: "started" },
+      { type: "agent.tool", tool: "getAvailability", status: "completed", outcome },
+    ]);
+    expect(activities.filter((activity) =>
+      activity.kind === "public" && activity.event.type === "agent.status" && activity.event.status === "planning"
+    )).toHaveLength(2);
+  });
+
+  it("tool technical failure emits failed and propagates the original error", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK"] });
+    const original = new Error("original tool failure");
+    mockedExecuteAction.mockRejectedValueOnce(original);
+    const { activities, sink } = activityCollector();
+
+    await expect(invokeSalesGraphWithEvents({ ...stateWithRef, threadId: "events-tool-failure" }, sink))
+      .rejects.toBe(original);
+
+    const toolEvents = activities.flatMap((activity) =>
+      activity.kind === "public" && activity.event.type === "agent.tool" ? [activity.event] : [],
+    );
+    expect(toolEvents).toEqual([
+      { type: "agent.tool", tool: "getAvailability", status: "started" },
+      { type: "agent.tool", tool: "getAvailability", status: "failed" },
+    ]);
+  });
+
+  it("guardrail emits exactly one sanitized mapped decision", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    const { activities, sink } = activityCollector();
+    const guardedState: M3AKState = {
+      ...initialState,
+      threadId: "events-guardrail",
+      lastResult: { action: "CHECK_STOCK", ok: false, result: { found: false }, resolvedRef: null },
+    };
+
+    await invokeSalesGraphWithEvents(guardedState, sink);
+
+    const guardrailEvents = activities.flatMap((activity) =>
+      activity.kind === "public" && activity.event.type === "agent.guardrail" ? [activity.event] : [],
+    );
+    expect(guardrailEvents).toEqual([{
+      type: "agent.guardrail",
+      status: "blocked",
+      categories: ["stock_unverified"],
+    }]);
+    expect(JSON.stringify(guardrailEvents)).not.toContain("missing_stock_evidence");
+  });
+
+  it("real escalation emits status before the operation and a durable-only success observation", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    const { activities, sink } = activityCollector();
+    mockedCreateEscalation.mockImplementationOnce(async () => {
+      expect(activities.at(-1)).toEqual({
+        kind: "public",
+        event: { type: "agent.status", status: "escalating_to_human" },
+      });
+      return {
+        created: true,
+        replayed: false,
+        escalation: {
+          id: "escalation-events",
+          conversationId: "conversation-events",
+          reason: "orchestrator_requested_escalation",
+          contextSummary: "sanitized test context",
+          status: "open" as const,
+          createdAt: "2026-09-19T00:00:00.000Z",
+        },
+      };
+    });
+
+    await invokeSalesGraphWithEvents({
+      ...initialState,
+      threadId: "events-escalation",
+      conversationId: "conversation-events",
+    }, sink);
+
+    expect(activities).toContainEqual({ kind: "escalation_created" });
+    expect(activities.flatMap(toDurableAgentEventRecords)).toContainEqual({
+      eventType: "escalation_created",
+      payload: {},
+    });
+  });
+
+  it("emits saving_conversation immediately before real persistence", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    const { activities, sink } = activityCollector();
+    mockedPersistConversation.mockImplementationOnce(async () => {
+      expect(activities.at(-1)).toEqual({
+        kind: "public",
+        event: { type: "agent.status", status: "saving_conversation" },
+      });
+      return { persisted: true, conversation: DEFAULT_PERSISTED_CONVERSATION, newMessageCount: 0 };
+    });
+
+    await invokeSalesGraphWithEvents({
+      ...initialState,
+      threadId: "events-persist",
+      conversationId: "conversation-events",
+    }, sink);
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("successful CREATE_ORDER projects a durable order_created observation without an ID", async () => {
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["CREATE_ORDER"] })
+      .mockResolvedValueOnce({ plan: [] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true,
+      result: { created: true, order: { id: "private-order-id" } },
+      resolvedRef: null,
+      orderId: "private-order-id",
+    });
+    const { activities, sink } = activityCollector();
+
+    await invokeSalesGraphWithEvents({ ...initialState, threadId: "events-order" }, sink);
+
+    const records = activities.flatMap(toDurableAgentEventRecords);
+    expect(records).toContainEqual({ eventType: "order_created", payload: {} });
+    expect(JSON.stringify(records)).not.toContain("private-order-id");
+  });
+
+  it("a throwing activity sink never changes graph behavior and ordinary invoke remains compatible", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] }).mockResolvedValueOnce({ plan: [] });
+    const throwingSink = vi.fn(() => { throw new Error("observer failed"); });
+
+    const observed = await invokeSalesGraphWithEvents(
+      { ...initialState, threadId: "events-throwing-sink" },
+      throwingSink,
+    );
+    const ordinary = await invokeSalesGraph({ ...initialState, threadId: "events-ordinary-invoke" });
+
+    expect(throwingSink).toHaveBeenCalled();
+    expect(observed.lastError).toBe("conversation_persistence_skipped: missing_conversation_id");
+    expect(ordinary.lastError).toBe("conversation_persistence_skipped: missing_conversation_id");
   });
 });

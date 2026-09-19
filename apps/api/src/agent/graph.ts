@@ -5,8 +5,16 @@ import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
+import {
+  createGuardrailEvent,
+  emitAgentActivity,
+  NOOP_AGENT_ACTIVITY_SINK,
+  PUBLIC_TOOL_BY_ACTION,
+  type AgentActivitySink,
+  type PublicToolAction,
+} from "./events";
 import { evaluateCommercialGuardrails } from "./guardrails";
-import { type AllowedAction, deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
+import { deriveLastOutcomeOk, OrchestratorError, planNextActions } from "./orchestrator";
 import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state";
 
 // Every TASK-018 node is a structural no-op: it proves graph topology only.
@@ -101,7 +109,7 @@ const EXECUTABLE_ACTIONS = new Set<string>([
   "CREATE_ORDER",
 ]);
 
-function isExecutableAction(value: string | null): value is AllowedAction {
+function isExecutableAction(value: string | null): value is PublicToolAction {
   return value !== null && EXECUTABLE_ACTIONS.has(value);
 }
 
@@ -165,13 +173,38 @@ function routeAfterRouter(state: M3AKState): "tool" | "guardrail" {
 // empty plan) already happened in router/routeAfterRouter, so tool only ever
 // runs when routeAfterRouter has already confirmed a real, dispatchable
 // action and remaining budget.
-async function tool(state: M3AKState) {
+async function tool(state: M3AKState, activitySink: AgentActivitySink) {
   if (!isExecutableAction(state.nextAction)) {
     throw new Error(`tool node reached with a non-executable nextAction: ${String(state.nextAction)}`);
   }
   const action = state.nextAction;
+  const publicTool = PUBLIC_TOOL_BY_ACTION[action];
 
-  const outcome = await executeAction(action, state);
+  emitAgentActivity(activitySink, {
+    kind: "public",
+    event: { type: "agent.tool", tool: publicTool, status: "started" },
+  });
+
+  let outcome;
+  try {
+    outcome = await executeAction(action, state);
+  } catch (error) {
+    emitAgentActivity(activitySink, {
+      kind: "public",
+      event: { type: "agent.tool", tool: publicTool, status: "failed" },
+    });
+    throw error;
+  }
+
+  emitAgentActivity(activitySink, {
+    kind: "public",
+    event: {
+      type: "agent.tool",
+      tool: publicTool,
+      status: "completed",
+      outcome: outcome.ok ? "positive" : "negative",
+    },
+  });
 
   const patch: Partial<M3AKState> = {
     executedSteps: [...state.executedSteps, action],
@@ -202,8 +235,10 @@ async function tool(state: M3AKState) {
 // TASK-021: reads the loop's final observation and writes only the four
 // guardrail state fields (plus the narrowly-scoped promotion/delivery
 // patches) — never touches activePlan/nextAction/executedSteps/etc.
-function guardrail(state: M3AKState) {
+function guardrail(state: M3AKState, activitySink: AgentActivitySink) {
   const decision = evaluateCommercialGuardrails(state);
+
+  emitAgentActivity(activitySink, { kind: "public", event: createGuardrailEvent(decision) });
 
   const patch: Partial<M3AKState> = {
     authorized: decision.authorized,
@@ -226,7 +261,7 @@ function guardrail(state: M3AKState) {
 // humanInterventionNeeded. Reason/summary are derived deterministically from
 // already-safe state fields — no LLM, no re-evaluation of guardrails, no
 // inspection of customer text.
-async function escalation(state: M3AKState) {
+async function escalation(state: M3AKState, activitySink: AgentActivitySink) {
   if (state.conversationId === null) {
     return { lastError: "escalation_creation_failed: missing_conversation_id" };
   }
@@ -240,12 +275,17 @@ async function escalation(state: M3AKState) {
     `guardrailReasons=[${state.guardrailReasons.join(",")}]; ` +
     `lastError=${state.lastError ?? "none"}`;
 
+  emitAgentActivity(activitySink, {
+    kind: "public",
+    event: { type: "agent.status", status: "escalating_to_human" },
+  });
   const result = await createEscalation(state.conversationId, reason, contextSummary);
 
   if (!result.created) {
     return { lastError: `escalation_creation_failed: ${result.reason}` };
   }
 
+  emitAgentActivity(activitySink, { kind: "escalation_created" });
   return { escalationId: result.escalation.id };
 }
 
@@ -260,7 +300,7 @@ function routeAfterGuardrail(state: M3AKState): "escalation" | "response" {
 // a controlled persistence skip/failure is only recorded when no earlier
 // node has already reported something more important. Unexpected thrown
 // DB/programmer errors are never caught here and still propagate as-is.
-async function persist(state: M3AKState) {
+async function persist(state: M3AKState, activitySink: AgentActivitySink) {
   if (state.conversationId === null) {
     if (state.lastError !== null) {
       return {};
@@ -268,6 +308,10 @@ async function persist(state: M3AKState) {
     return { lastError: "conversation_persistence_skipped: missing_conversation_id" };
   }
 
+  emitAgentActivity(activitySink, {
+    kind: "public",
+    event: { type: "agent.status", status: "saving_conversation" },
+  });
   const result = await persistConversation(
     state.conversationId,
     state.language,
@@ -288,16 +332,28 @@ async function persist(state: M3AKState) {
 // Uncompiled builder: topology only, no side effects. compileSalesGraph()
 // compiles this same builder with a checkpointer without touching node/edge
 // wiring (TASK-024).
-export function buildSalesGraph() {
+export function buildSalesGraph(activitySink: AgentActivitySink = NOOP_AGENT_ACTIVITY_SINK) {
   return new StateGraph(M3AKStateObjectSchema)
-    .addNode("loadContext", loadContext)
+    .addNode("loadContext", (state) => {
+      emitAgentActivity(activitySink, {
+        kind: "public",
+        event: { type: "agent.status", status: "loading_context" },
+      });
+      return loadContext(state);
+    })
     .addNode("conversation", noop)
-    .addNode("router", router)
-    .addNode("tool", tool)
-    .addNode("guardrail", guardrail)
-    .addNode("escalation", escalation)
+    .addNode("router", (state) => {
+      emitAgentActivity(activitySink, {
+        kind: "public",
+        event: { type: "agent.status", status: "planning" },
+      });
+      return router(state);
+    })
+    .addNode("tool", (state) => tool(state, activitySink))
+    .addNode("guardrail", (state) => guardrail(state, activitySink))
+    .addNode("escalation", (state) => escalation(state, activitySink))
     .addNode("response", noop)
-    .addNode("persist", persist)
+    .addNode("persist", (state) => persist(state, activitySink))
     .addEdge(START, "loadContext")
     .addEdge("loadContext", "conversation")
     .addEdge("conversation", "router")
@@ -312,8 +368,11 @@ export function buildSalesGraph() {
 // TASK-024: defaults to the production PostgreSQL checkpointer singleton;
 // tests inject a MemorySaver (or a mock) instead — never a second production
 // checkpointer/pool.
-export function compileSalesGraph(checkpointer: BaseCheckpointSaver = langgraphCheckpointer) {
-  return buildSalesGraph().compile({ checkpointer });
+export function compileSalesGraph(
+  checkpointer: BaseCheckpointSaver = langgraphCheckpointer,
+  activitySink: AgentActivitySink = NOOP_AGENT_ACTIVITY_SINK,
+) {
+  return buildSalesGraph(activitySink).compile({ checkpointer });
 }
 
 // M3AKStateObjectSchema (used above for LangGraph channel construction) does
@@ -328,6 +387,18 @@ export function compileSalesGraph(checkpointer: BaseCheckpointSaver = langgraphC
 export async function invokeSalesGraph(input: unknown): Promise<M3AKState> {
   const validatedInput = M3AKStateSchema.parse(input);
   const compiled = compileSalesGraph();
+  const result = await compiled.invoke(validatedInput, {
+    configurable: { thread_id: validatedInput.threadId },
+  });
+  return M3AKStateSchema.parse(result);
+}
+
+// TASK-030: same invocation/checkpoint contract as invokeSalesGraph, with a
+// synchronous, sanitized observational sink. The sink is defensively isolated
+// by emitAgentActivity and cannot change graph business execution.
+export async function invokeSalesGraphWithEvents(input: unknown, activitySink: AgentActivitySink): Promise<M3AKState> {
+  const validatedInput = M3AKStateSchema.parse(input);
+  const compiled = compileSalesGraph(langgraphCheckpointer, activitySink);
   const result = await compiled.invoke(validatedInput, {
     configurable: { thread_id: validatedInput.threadId },
   });

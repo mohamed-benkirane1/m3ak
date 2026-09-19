@@ -1,6 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { invokeSalesGraph } from "../agent/graph";
+import {
+  MAX_AGENT_EVENT_BATCH_SIZE,
+  persistAgentEvents,
+  toDurableAgentEventRecords,
+  toPublicAgentEvent,
+  type AgentActivitySink,
+  type DurableAgentEventRecord,
+  type PublicAgentEvent,
+} from "../agent/events";
+import { invokeSalesGraphWithEvents } from "../agent/graph";
 import { M3AKStateSchema, type M3AKState } from "../agent/state";
 import { createChatSession, CustomerRefSchema, type CreateChatSessionResult } from "../conversation/chatSession";
 
@@ -99,6 +108,15 @@ export function registerChatRoute(server: FastifyInstance): void {
       socket.send(JSON.stringify(envelope));
     };
 
+    const sendActivity = (event: PublicAgentEvent): void => {
+      if (socket.readyState !== 1) return;
+      try {
+        socket.send(JSON.stringify(event));
+      } catch {
+        request.log.warn({ eventType: event.type }, "public agent activity delivery failed");
+      }
+    };
+
     if (!query.success) {
       sendError("invalid_payload", "A valid customerRef query parameter is required.");
       socket.close(1008, "Invalid customerRef");
@@ -134,6 +152,8 @@ export function registerChatRoute(server: FastifyInstance): void {
 
       busy = true;
       void (async () => {
+        let auditConversationId: string | null = null;
+        const auditRecords: DurableAgentEventRecord[] = [];
         try {
           let session: CreateChatSessionResult;
           try {
@@ -150,9 +170,26 @@ export function registerChatRoute(server: FastifyInstance): void {
             return;
           }
 
+          auditConversationId = session.conversationId;
+          const activitySink: AgentActivitySink = (activity) => {
+            const publicEvent = toPublicAgentEvent(activity);
+            if (publicEvent !== null) sendActivity(publicEvent);
+
+            const records = toDurableAgentEventRecords(activity);
+            const remainingCapacity = MAX_AGENT_EVENT_BATCH_SIZE - auditRecords.length;
+            if (records.length <= remainingCapacity) {
+              auditRecords.push(...records);
+            } else {
+              request.log.warn("agent activity audit batch capacity reached");
+            }
+          };
+
           let result: M3AKState;
           try {
-            result = await invokeSalesGraph(createFreshState(session.threadId, incoming.content));
+            result = await invokeSalesGraphWithEvents(
+              createFreshState(session.threadId, incoming.content),
+              activitySink,
+            );
           } catch (error) {
             request.log.error(
               { err: error, conversationId: session.conversationId, threadId: session.threadId },
@@ -179,6 +216,13 @@ export function registerChatRoute(server: FastifyInstance): void {
           request.log.error({ err: error }, "unexpected chat message processing failure");
           sendError("graph_error", "The assistant could not process this message. Please try again.");
         } finally {
+          if (auditConversationId !== null && auditRecords.length > 0) {
+            try {
+              await persistAgentEvents(auditConversationId, auditRecords);
+            } catch (error) {
+              request.log.error({ err: error }, "agent activity audit persistence failed");
+            }
+          }
           busy = false;
         }
       })();

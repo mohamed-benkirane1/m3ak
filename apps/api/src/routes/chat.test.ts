@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent/graph", () => ({
-  invokeSalesGraph: vi.fn(),
+  invokeSalesGraphWithEvents: vi.fn(),
 }));
+
+vi.mock("../agent/events", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agent/events")>();
+  return { ...actual, persistAgentEvents: vi.fn() };
+});
 
 vi.mock("../conversation/chatSession", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../conversation/chatSession")>();
@@ -12,12 +17,14 @@ vi.mock("../conversation/chatSession", async (importOriginal) => {
 import websocketPlugin from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
-import { invokeSalesGraph } from "../agent/graph";
+import { persistAgentEvents, type AgentActivitySink } from "../agent/events";
+import { invokeSalesGraphWithEvents } from "../agent/graph";
 import type { M3AKState } from "../agent/state";
 import { createChatSession } from "../conversation/chatSession";
 import { registerChatRoute } from "./chat";
 
-const mockedInvokeSalesGraph = vi.mocked(invokeSalesGraph);
+const mockedInvokeSalesGraphWithEvents = vi.mocked(invokeSalesGraphWithEvents);
+const mockedPersistAgentEvents = vi.mocked(persistAgentEvents);
 const mockedCreateChatSession = vi.mocked(createChatSession);
 
 const SESSION = {
@@ -68,7 +75,18 @@ async function connect(server: FastifyInstance, path = "/ws/chat?customerRef=KEN
 }
 
 function replyWith(content: string) {
-  mockedInvokeSalesGraph.mockImplementationOnce(async (input) => {
+  mockedInvokeSalesGraphWithEvents.mockImplementationOnce(async (input) => {
+    const state = input as M3AKState;
+    return { ...state, messages: [...state.messages, { role: "assistant", content }] };
+  });
+}
+
+function replyWithActivities(
+  content: string,
+  emit: (sink: AgentActivitySink) => void,
+): void {
+  mockedInvokeSalesGraphWithEvents.mockImplementationOnce(async (input, sink) => {
+    emit(sink);
     const state = input as M3AKState;
     return { ...state, messages: [...state.messages, { role: "assistant", content }] };
   });
@@ -80,6 +98,7 @@ function sendMessage(socket: WebSocket, content = "Salam"): void {
 
 beforeEach(() => {
   mockedCreateChatSession.mockResolvedValue(SESSION);
+  mockedPersistAgentEvents.mockResolvedValue();
   replyWith("Marhba!");
 });
 
@@ -104,7 +123,7 @@ describe("/ws/chat connection and input protocol", () => {
     const client = await connect(await makeServer(), path);
     await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "invalid_payload" });
     expect(mockedCreateChatSession).not.toHaveBeenCalled();
-    expect(mockedInvokeSalesGraph).not.toHaveBeenCalled();
+    expect(mockedInvokeSalesGraphWithEvents).not.toHaveBeenCalled();
   });
 
   it("4: reports an unknown customer without invoking the graph", async () => {
@@ -113,7 +132,7 @@ describe("/ws/chat connection and input protocol", () => {
     sendMessage(client.ws);
 
     await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "customer_not_found" });
-    expect(mockedInvokeSalesGraph).not.toHaveBeenCalled();
+    expect(mockedInvokeSalesGraphWithEvents).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -130,7 +149,7 @@ describe("/ws/chat connection and input protocol", () => {
 
     await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "invalid_payload" });
     expect(mockedCreateChatSession).not.toHaveBeenCalled();
-    expect(mockedInvokeSalesGraph).not.toHaveBeenCalled();
+    expect(mockedInvokeSalesGraphWithEvents).not.toHaveBeenCalled();
   });
 
   it("7: rejects binary frames without invoking the graph", async () => {
@@ -138,7 +157,7 @@ describe("/ws/chat connection and input protocol", () => {
     client.ws.send(Buffer.from('{"type":"message","content":"hi"}'), { binary: true });
 
     await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "invalid_payload" });
-    expect(mockedInvokeSalesGraph).not.toHaveBeenCalled();
+    expect(mockedInvokeSalesGraphWithEvents).not.toHaveBeenCalled();
   });
 });
 
@@ -151,8 +170,8 @@ describe("/ws/chat session and graph integration", () => {
     await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Marhba!" });
 
     expect(mockedCreateChatSession).toHaveBeenCalledExactlyOnceWith("KENZA-001");
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(1);
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledWith({
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledWith({
       threadId: SESSION.threadId,
       conversationId: null,
       customerId: null,
@@ -182,7 +201,7 @@ describe("/ws/chat session and graph integration", () => {
       orderId: null,
       escalationId: null,
       followupId: null,
-    });
+    }, expect.any(Function));
   });
 
   it("14: reuses one session for later messages on the same socket", async () => {
@@ -194,8 +213,8 @@ describe("/ws/chat session and graph integration", () => {
     await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Second reply" });
 
     expect(mockedCreateChatSession).toHaveBeenCalledTimes(1);
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(2);
-    expect((mockedInvokeSalesGraph.mock.calls[1]?.[0] as M3AKState).threadId).toBe(SESSION.threadId);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(2);
+    expect((mockedInvokeSalesGraphWithEvents.mock.calls[1]?.[0] as M3AKState).threadId).toBe(SESSION.threadId);
   });
 
   it("15: two sockets for one customer receive different server-issued threads", async () => {
@@ -212,8 +231,8 @@ describe("/ws/chat session and graph integration", () => {
     await second.nextJson();
 
     expect(mockedCreateChatSession).toHaveBeenCalledTimes(2);
-    expect((mockedInvokeSalesGraph.mock.calls[0]?.[0] as M3AKState).threadId).toBe(SESSION.threadId);
-    expect((mockedInvokeSalesGraph.mock.calls[1]?.[0] as M3AKState).threadId).toBe("thread-2");
+    expect((mockedInvokeSalesGraphWithEvents.mock.calls[0]?.[0] as M3AKState).threadId).toBe(SESSION.threadId);
+    expect((mockedInvokeSalesGraphWithEvents.mock.calls[1]?.[0] as M3AKState).threadId).toBe("thread-2");
   });
 
   it("16: retries session creation after a transient rejection", async () => {
@@ -225,14 +244,14 @@ describe("/ws/chat session and graph integration", () => {
     await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Marhba!" });
 
     expect(mockedCreateChatSession).toHaveBeenCalledTimes(2);
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(1);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("/ws/chat output, failures, and concurrency", () => {
   it("22/23: never falls back to an old assistant message", async () => {
-    mockedInvokeSalesGraph.mockReset();
-    mockedInvokeSalesGraph.mockImplementationOnce(async (input) => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    mockedInvokeSalesGraphWithEvents.mockImplementationOnce(async (input) => {
       const state = input as M3AKState;
       return {
         ...state,
@@ -249,8 +268,8 @@ describe("/ws/chat output, failures, and concurrency", () => {
   });
 
   it("24/25: graph failures produce a safe error without raw technical details", async () => {
-    mockedInvokeSalesGraph.mockReset();
-    mockedInvokeSalesGraph.mockRejectedValueOnce(new Error("secret database stack detail"));
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    mockedInvokeSalesGraphWithEvents.mockRejectedValueOnce(new Error("secret database stack detail"));
     const client = await connect(await makeServer());
     sendMessage(client.ws);
 
@@ -260,9 +279,9 @@ describe("/ws/chat output, failures, and concurrency", () => {
   });
 
   it("26/27/28/29: enforces one active graph call per connection and clears busy in finally", async () => {
-    mockedInvokeSalesGraph.mockReset();
+    mockedInvokeSalesGraphWithEvents.mockReset();
     let releaseFirst!: (state: M3AKState) => void;
-    mockedInvokeSalesGraph.mockImplementationOnce(
+    mockedInvokeSalesGraphWithEvents.mockImplementationOnce(
       (input) => new Promise<M3AKState>((resolve) => {
         const state = input as M3AKState;
         releaseFirst = () => resolve({ ...state, messages: [...state.messages, { role: "assistant", content: "first" }] });
@@ -273,21 +292,21 @@ describe("/ws/chat output, failures, and concurrency", () => {
     sendMessage(client.ws, "second");
 
     await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "busy" });
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(1);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
 
     releaseFirst({} as M3AKState);
     await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "first" });
     replyWith("third");
     sendMessage(client.ws, "third");
     await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "third" });
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(2);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(2);
   });
 
   it("disconnect does not cancel an already-started graph invocation", async () => {
-    mockedInvokeSalesGraph.mockReset();
+    mockedInvokeSalesGraphWithEvents.mockReset();
     let resolveGraph!: (state: M3AKState) => void;
     const completed = new Promise<void>((resolve) => {
-      mockedInvokeSalesGraph.mockImplementationOnce(
+      mockedInvokeSalesGraphWithEvents.mockImplementationOnce(
         (input) => new Promise<M3AKState>((resolveInvocation) => {
           const state = input as M3AKState;
           resolveGraph = (result) => {
@@ -299,12 +318,148 @@ describe("/ws/chat output, failures, and concurrency", () => {
     });
     const client = await connect(await makeServer());
     sendMessage(client.ws);
-    await vi.waitFor(() => expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1));
     client.ws.terminate();
-    const state = mockedInvokeSalesGraph.mock.calls[0]?.[0] as M3AKState;
+    const state = mockedInvokeSalesGraphWithEvents.mock.calls[0]?.[0] as M3AKState;
     resolveGraph({ ...state, messages: [...state.messages, { role: "assistant", content: "done" }] });
     await completed;
 
-    expect(mockedInvokeSalesGraph).toHaveBeenCalledTimes(1);
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("/ws/chat TASK-030 public activity and audit", () => {
+  it("delivers status, tool, and guardrail events in natural order before the unchanged final message", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    replyWithActivities("Final reply", (sink) => {
+      sink({ kind: "public", event: { type: "agent.status", status: "loading_context" } });
+      sink({ kind: "public", event: { type: "agent.tool", tool: "searchProducts", status: "started" } });
+      sink({
+        kind: "public",
+        event: { type: "agent.tool", tool: "searchProducts", status: "completed", outcome: "positive" },
+      });
+      sink({
+        kind: "public",
+        event: { type: "agent.guardrail", status: "allowed", categories: [] },
+      });
+    });
+    const client = await connect(await makeServer());
+    sendMessage(client.ws);
+
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.status", status: "loading_context" });
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.tool", tool: "searchProducts", status: "started" });
+    await expect(client.nextJson()).resolves.toEqual({
+      type: "agent.tool", tool: "searchProducts", status: "completed", outcome: "positive",
+    });
+    await expect(client.nextJson()).resolves.toEqual({
+      type: "agent.guardrail", status: "allowed", categories: [],
+    });
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Final reply" });
+  });
+
+  it("flushes all projected audit records in one call after a successful turn", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    replyWithActivities("Done", (sink) => {
+      sink({ kind: "public", event: { type: "agent.status", status: "planning" } });
+      sink({ kind: "public", event: { type: "agent.tool", tool: "createOrder", status: "started" } });
+      sink({
+        kind: "public",
+        event: { type: "agent.tool", tool: "createOrder", status: "completed", outcome: "positive" },
+      });
+      sink({ kind: "escalation_created" });
+    });
+    const client = await connect(await makeServer());
+    sendMessage(client.ws);
+    for (let index = 0; index < 3; index += 1) await client.nextJson();
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Done" });
+    await vi.waitFor(() => expect(mockedPersistAgentEvents).toHaveBeenCalledTimes(1));
+
+    expect(mockedPersistAgentEvents).toHaveBeenCalledWith(SESSION.conversationId, [
+      { eventType: "node_started", payload: { stage: "planning" } },
+      { eventType: "tool_called", payload: { tool: "createOrder" } },
+      { eventType: "tool_succeeded", payload: { tool: "createOrder", outcome: "positive" } },
+      { eventType: "order_created", payload: {} },
+      { eventType: "escalation_created", payload: {} },
+    ]);
+  });
+
+  it("flushes collected records after graph failure while preserving the safe graph_error", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    mockedInvokeSalesGraphWithEvents.mockImplementationOnce(async (_input, sink) => {
+      sink({ kind: "public", event: { type: "agent.tool", tool: "getAvailability", status: "failed" } });
+      throw new Error("private technical detail");
+    });
+    const client = await connect(await makeServer());
+    sendMessage(client.ws);
+
+    await expect(client.nextJson()).resolves.toEqual({
+      type: "agent.tool", tool: "getAvailability", status: "failed",
+    });
+    const terminal = await client.nextJson();
+    expect(terminal).toMatchObject({ type: "agent.error", code: "graph_error" });
+    expect(JSON.stringify(terminal)).not.toContain("private technical detail");
+    await vi.waitFor(() => expect(mockedPersistAgentEvents).toHaveBeenCalledWith(SESSION.conversationId, [
+      { eventType: "tool_failed", payload: { tool: "getAvailability" } },
+    ]));
+  });
+
+  it("a synchronous activity send failure does not alter graph completion", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    replyWithActivities("Still succeeds", (sink) => {
+      sink({ kind: "public", event: { type: "agent.status", status: "planning" } });
+    });
+    const server = await makeServer();
+    const client = await connect(server);
+    const serverSocket = [...server.websocketServer.clients][0];
+    if (!serverSocket) throw new Error("expected injected server socket");
+    vi.spyOn(serverSocket, "send").mockImplementationOnce(() => {
+      throw new Error("socket delivery failed");
+    });
+    sendMessage(client.ws);
+
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Still succeeds" });
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it("audit persistence failure does not replace the terminal business result", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    mockedPersistAgentEvents.mockRejectedValueOnce(new Error("audit database unavailable"));
+    replyWithActivities("Business result", (sink) => {
+      sink({ kind: "public", event: { type: "agent.status", status: "planning" } });
+    });
+    const client = await connect(await makeServer());
+    sendMessage(client.ws);
+
+    await client.nextJson();
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "Business result" });
+    await vi.waitFor(() => expect(mockedPersistAgentEvents).toHaveBeenCalledTimes(1));
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the per-connection busy flag active through the final audit flush", async () => {
+    mockedInvokeSalesGraphWithEvents.mockReset();
+    replyWithActivities("First result", (sink) => {
+      sink({ kind: "public", event: { type: "agent.status", status: "planning" } });
+    });
+    let releaseAudit!: () => void;
+    mockedPersistAgentEvents.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseAudit = resolve; }),
+    );
+    const client = await connect(await makeServer());
+    sendMessage(client.ws, "first");
+    await client.nextJson();
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "First result" });
+    await vi.waitFor(() => expect(mockedPersistAgentEvents).toHaveBeenCalledTimes(1));
+
+    sendMessage(client.ws, "while auditing");
+    await expect(client.nextJson()).resolves.toMatchObject({ type: "agent.error", code: "busy" });
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(1);
+
+    releaseAudit();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    replyWith("After audit");
+    sendMessage(client.ws, "after auditing");
+    await expect(client.nextJson()).resolves.toEqual({ type: "agent.message", content: "After audit" });
+    expect(mockedInvokeSalesGraphWithEvents).toHaveBeenCalledTimes(2);
   });
 });
