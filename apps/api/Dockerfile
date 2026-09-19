@@ -13,6 +13,7 @@ RUN npm ci
 
 COPY . .
 
+RUN npm run build --workspace @m3ak/shared
 RUN npm run build --workspace @m3ak/api
 
 EXPOSE 3001
