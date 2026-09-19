@@ -12,11 +12,23 @@ const server = Fastify({ logger: true });
 
 server.register(websocketPlugin, { options: { maxPayload: 64 * 1024 } });
 
-server.get("/", async () => ({ service: "m3ak-api" }));
+// WS1: server.register() defers the plugin body (including @fastify/websocket's
+// own onRoute hook, which rewrites a {websocket:true} route's handler into the
+// real socket-aware dispatcher) to the async avvio boot queue — it does not run
+// synchronously. Registering routes immediately after, as plain synchronous
+// statements, let /ws/chat be added before that onRoute hook existed, so
+// Fastify stored registerChatRoute's handler as an ordinary (request, reply)
+// HTTP handler instead: "socket" was actually the FastifyRequest, and
+// "request" was actually the FastifyReply, hence "socket.close is not a
+// function". server.after() runs its callback only once every plugin queued
+// ahead of it (here, the websocket plugin) has fully finished loading.
+server.after(() => {
+  server.get("/", async () => ({ service: "m3ak-api" }));
 
-registerHealthRoute(server);
-registerDashboardRoute(server);
-registerChatRoute(server);
+  registerHealthRoute(server);
+  registerDashboardRoute(server);
+  registerChatRoute(server);
+});
 
 const port = Number(process.env.API_PORT ?? 3001);
 
