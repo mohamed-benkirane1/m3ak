@@ -52,10 +52,10 @@ const GUARDRAIL_CATEGORIES = [
   "unverifiable_result",
 ] as const;
 
-type AgentStatus = (typeof AGENT_STATUSES)[number];
-type PublicToolName = (typeof PUBLIC_TOOL_NAMES)[number];
-type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number];
-type GuardrailCategory = (typeof GUARDRAIL_CATEGORIES)[number];
+export type AgentStatus = (typeof AGENT_STATUSES)[number];
+export type PublicToolName = (typeof PUBLIC_TOOL_NAMES)[number];
+export type GuardrailStatus = (typeof GUARDRAIL_STATUSES)[number];
+export type GuardrailCategory = (typeof GUARDRAIL_CATEGORIES)[number];
 
 export type ServerFrame =
   | { type: "agent.message"; content: string }
@@ -65,6 +65,85 @@ export type ServerFrame =
   | { type: "agent.tool"; tool: PublicToolName; status: "completed"; outcome: "positive" | "negative" }
   | { type: "agent.tool"; tool: PublicToolName; status: "failed" }
   | { type: "agent.guardrail"; status: GuardrailStatus; categories: GuardrailCategory[] };
+
+export type ActivityState =
+  | "info"
+  | "running"
+  | "positive"
+  | "negative"
+  | "failed"
+  | "allowed"
+  | "blocked"
+  | "clarification"
+  | "escalation"
+  | "neutral";
+
+export interface ActivityItem {
+  id: number;
+  turnId: number;
+  kind: "status" | "tool" | "guardrail";
+  label: string;
+  state: ActivityState;
+  details?: string[];
+  toolKey?: PublicToolName;
+}
+
+const STATUS_LABELS: Record<AgentStatus, string> = {
+  loading_context: "Chargement du contexte client",
+  planning: "Planification de la prochaine action",
+  escalating_to_human: "Escalade vers un conseiller humain",
+  saving_conversation: "Enregistrement de la conversation",
+};
+
+const TOOL_LABELS: Record<PublicToolName, string> = {
+  searchProducts: "Recherche dans le catalogue",
+  getAvailability: "Vérification du stock",
+  findAlternatives: "Recherche d’alternatives",
+  getApplicablePromotion: "Vérification des promotions",
+  getDeliveryOptions: "Calcul des options de livraison",
+  createCart: "Création du panier",
+  addCartItem: "Ajout au panier",
+  createOrder: "Création de la commande",
+};
+
+const GUARDRAIL_STATUS_LABELS: Record<GuardrailStatus, string> = {
+  allowed: "Contrôle autorisé",
+  blocked: "Action bloquée",
+  clarification_required: "Clarification nécessaire",
+  escalation_required: "Intervention humaine requise",
+  not_applicable: "Aucun contrôle applicable",
+};
+
+const GUARDRAIL_CATEGORY_LABELS: Record<GuardrailCategory, string> = {
+  ambiguous_product: "Produit ambigu",
+  stock_unverified: "Stock non vérifié",
+  promotion_unverified: "Promotion non vérifiée",
+  delivery_unverified: "Livraison non vérifiée",
+  unsupported_restock: "Réassort non vérifiable",
+  automation_limit: "Limite d’automatisation atteinte",
+  unverifiable_result: "Résultat non vérifiable",
+};
+
+const GUARDRAIL_STATES: Record<GuardrailStatus, ActivityState> = {
+  allowed: "allowed",
+  blocked: "blocked",
+  clarification_required: "clarification",
+  escalation_required: "escalation",
+  not_applicable: "neutral",
+};
+
+const ACTIVITY_STATE_LABELS: Record<ActivityState, string> = {
+  info: "Information",
+  running: "En cours",
+  positive: "Terminé — résultat positif",
+  negative: "Terminé — résultat négatif",
+  failed: "Erreur technique",
+  allowed: "Contrôle autorisé",
+  blocked: "Action bloquée",
+  clarification: "Clarification nécessaire",
+  escalation: "Intervention humaine requise",
+  neutral: "Aucun contrôle applicable",
+};
 
 export interface OutgoingMessage {
   type: "message";
@@ -174,6 +253,97 @@ export function buildOutgoingMessage(rawContent: string): OutgoingMessage | null
   const content = rawContent.trim();
   if (content.length === 0 || content.length > 4_000) return null;
   return { type: "message", content };
+}
+
+export function getActivityStatusLabel(status: AgentStatus): string {
+  return STATUS_LABELS[status];
+}
+
+export function getToolLabel(tool: PublicToolName): string {
+  return TOOL_LABELS[tool];
+}
+
+export function getGuardrailStatusLabel(status: GuardrailStatus): string {
+  return GUARDRAIL_STATUS_LABELS[status];
+}
+
+export function getGuardrailCategoryLabel(category: GuardrailCategory): string {
+  return GUARDRAIL_CATEGORY_LABELS[category];
+}
+
+export function getActivityStateLabel(state: ActivityState): string {
+  return ACTIVITY_STATE_LABELS[state];
+}
+
+function projectActivityFrame(frame: ServerFrame, turnId: number, id: number): ActivityItem | null {
+  if (frame.type === "agent.status") {
+    return {
+      id,
+      turnId,
+      kind: "status",
+      label: getActivityStatusLabel(frame.status),
+      state: "info",
+    };
+  }
+
+  if (frame.type === "agent.tool") {
+    const state: ActivityState = frame.status === "started"
+      ? "running"
+      : frame.status === "failed"
+        ? "failed"
+        : frame.outcome;
+    return {
+      id,
+      turnId,
+      kind: "tool",
+      label: getToolLabel(frame.tool),
+      state,
+      toolKey: frame.tool,
+    };
+  }
+
+  if (frame.type === "agent.guardrail") {
+    const details = frame.categories.map(getGuardrailCategoryLabel);
+    return {
+      id,
+      turnId,
+      kind: "guardrail",
+      label: getGuardrailStatusLabel(frame.status),
+      state: GUARDRAIL_STATES[frame.status],
+      ...(details.length > 0 ? { details } : {}),
+    };
+  }
+
+  return null;
+}
+
+export function applyActivityFrame(
+  currentItems: readonly ActivityItem[],
+  frame: ServerFrame,
+  turnId: number,
+  nextId: number,
+): ActivityItem[] {
+  const projected = projectActivityFrame(frame, turnId, nextId);
+  if (projected === null) return [...currentItems];
+
+  if (frame.type === "agent.tool" && frame.status !== "started") {
+    for (let index = currentItems.length - 1; index >= 0; index -= 1) {
+      const candidate = currentItems[index];
+      if (candidate === undefined) continue;
+      if (
+        candidate.kind === "tool"
+        && candidate.turnId === turnId
+        && candidate.toolKey === frame.tool
+        && candidate.state === "running"
+      ) {
+        const updated = [...currentItems];
+        updated[index] = { ...candidate, state: projected.state };
+        return updated;
+      }
+    }
+  }
+
+  return [...currentItems, projected];
 }
 
 export function getSafeErrorMessage(code: unknown): string {

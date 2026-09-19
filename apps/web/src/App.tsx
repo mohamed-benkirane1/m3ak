@@ -3,10 +3,13 @@ import {
   CONNECTION_ERROR_MESSAGE,
   DEMO_PERSONAS,
   UNKNOWN_SERVER_ERROR_MESSAGE,
+  applyActivityFrame,
   buildChatWebSocketUrl,
   buildOutgoingMessage,
+  getActivityStateLabel,
   getSafeErrorMessage,
   parseServerFrame,
+  type ActivityItem,
   type ConnectionState,
   type DemoCustomerRef,
   type TranscriptMessage,
@@ -26,11 +29,15 @@ function App() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const socketGenerationRef = useRef(0);
   const nextMessageIdRef = useRef(1);
+  const currentTurnIdRef = useRef(0);
+  const nextActivityIdRef = useRef(1);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const activityStreamRef = useRef<HTMLDivElement | null>(null);
 
   const selectedPersona = DEMO_PERSONAS.find((persona) => persona.customerRef === selectedCustomerRef) ?? null;
 
@@ -48,7 +55,10 @@ function App() {
     setDraft("");
     setError(null);
     setPending(false);
+    setActivity([]);
     nextMessageIdRef.current = 1;
+    currentTurnIdRef.current = 0;
+    nextActivityIdRef.current = 1;
   }
 
   function startConversation(): void {
@@ -112,9 +122,10 @@ function App() {
         return;
       }
 
-      // TASK-032 owns activity visualization. These valid TASK-030 frames are
-      // deliberately recognized but do not enter the transcript or alter the
-      // current turn's pending state.
+      const turnId = currentTurnIdRef.current;
+      if (turnId === 0) return;
+      const activityId = nextActivityIdRef.current++;
+      setActivity((current) => applyActivityFrame(current, frame, turnId, activityId));
     };
 
     socket.onerror = () => {
@@ -156,6 +167,7 @@ function App() {
 
     try {
       socket.send(JSON.stringify(outgoing));
+      currentTurnIdRef.current += 1;
     } catch {
       retireActiveSocket();
       setConnectionState("closed");
@@ -181,6 +193,11 @@ function App() {
   }, [messages, pending]);
 
   useEffect(() => {
+    const stream = activityStreamRef.current;
+    if (stream !== null) stream.scrollTop = stream.scrollHeight;
+  }, [activity]);
+
+  useEffect(() => {
     return () => {
       socketGenerationRef.current += 1;
       const socket = socketRef.current;
@@ -192,6 +209,15 @@ function App() {
   }, []);
 
   const canSend = connectionState === "open" && !pending && draft.trim().length > 0;
+  const activityGroups = activity.reduce<Array<{ turnId: number; items: ActivityItem[] }>>((groups, item) => {
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup?.turnId === item.turnId) {
+      lastGroup.items.push(item);
+    } else {
+      groups.push({ turnId: item.turnId, items: [item] });
+    }
+    return groups;
+  }, []);
 
   return (
     <main className="app-shell">
@@ -341,6 +367,64 @@ function App() {
             <p className="composer-hint">Entrée pour envoyer · Maj + Entrée pour une nouvelle ligne</p>
           </div>
         </section>
+
+        <aside className="activity-panel" aria-labelledby="activity-title">
+          <header className="activity-header">
+            <div>
+              <p className="activity-eyebrow">Workflow</p>
+              <h2 id="activity-title">Activité de l’agent</h2>
+            </div>
+            {connectionState === "open" ? (
+              <div className="live-indicator" role="status">
+                <span aria-hidden="true" />
+                Temps réel
+              </div>
+            ) : null}
+          </header>
+
+          <div
+            className="activity-stream"
+            ref={activityStreamRef}
+            aria-live="polite"
+            aria-label="Événements réels de l’agent"
+          >
+            {activityGroups.length === 0 ? (
+              <div className="activity-empty">
+                <span className="activity-empty-mark" aria-hidden="true" />
+                <p>Les actions réelles apparaîtront ici pendant la conversation.</p>
+              </div>
+            ) : (
+              <div className="activity-turns">
+                {activityGroups.map((group) => (
+                  <section className="activity-turn" key={group.turnId} aria-label={`Tour ${group.turnId}`}>
+                    <div className="turn-label"><span />Tour {group.turnId}</div>
+                    <ol className="activity-list">
+                      {group.items.map((item) => (
+                        <li
+                          className={`activity-item activity-item--${item.kind} activity-item--${item.state}`}
+                          key={item.id}
+                        >
+                          <span className="activity-marker" aria-hidden="true" />
+                          <div className="activity-copy">
+                            <p>{item.label}</p>
+                            {item.kind === "tool" ? (
+                              <span className="activity-state">{getActivityStateLabel(item.state)}</span>
+                            ) : null}
+                            {item.details?.length ? (
+                              <div className="activity-details">
+                                {item.details.map((detail) => <span key={detail}>{detail}</span>)}
+                              </div>
+                            ) : null}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
       </section>
     </main>
   );

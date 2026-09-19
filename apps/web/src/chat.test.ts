@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   DEMO_PERSONAS,
   UNKNOWN_SERVER_ERROR_MESSAGE,
+  applyActivityFrame,
   buildChatWebSocketUrl,
   buildOutgoingMessage,
+  getActivityStateLabel,
+  getActivityStatusLabel,
+  getGuardrailCategoryLabel,
+  getGuardrailStatusLabel,
   getSafeErrorMessage,
+  getToolLabel,
   parseServerFrame,
 } from "./chat";
 
@@ -148,5 +154,226 @@ describe("safe frontend error copy", () => {
     const rawSecret = "database stack and private server details";
     expect(getSafeErrorMessage("unknown_code")).toBe(UNKNOWN_SERVER_ERROR_MESSAGE);
     expect(getSafeErrorMessage("graph_error")).not.toContain(rawSecret);
+  });
+});
+
+describe("TASK-032 activity labels", () => {
+  it.each([
+    ["loading_context", "Chargement du contexte client"],
+    ["planning", "Planification de la prochaine action"],
+    ["escalating_to_human", "Escalade vers un conseiller humain"],
+    ["saving_conversation", "Enregistrement de la conversation"],
+  ] as const)("maps status %s", (status, label) => {
+    expect(getActivityStatusLabel(status)).toBe(label);
+  });
+
+  it.each([
+    ["searchProducts", "Recherche dans le catalogue"],
+    ["getAvailability", "Vérification du stock"],
+    ["findAlternatives", "Recherche d’alternatives"],
+    ["getApplicablePromotion", "Vérification des promotions"],
+    ["getDeliveryOptions", "Calcul des options de livraison"],
+    ["createCart", "Création du panier"],
+    ["addCartItem", "Ajout au panier"],
+    ["createOrder", "Création de la commande"],
+  ] as const)("maps tool %s", (tool, label) => {
+    expect(getToolLabel(tool)).toBe(label);
+  });
+
+  it.each([
+    ["running", "En cours"],
+    ["positive", "Terminé — résultat positif"],
+    ["negative", "Terminé — résultat négatif"],
+    ["failed", "Erreur technique"],
+  ] as const)("maps tool lifecycle state %s", (state, label) => {
+    expect(getActivityStateLabel(state)).toBe(label);
+  });
+
+  it.each([
+    ["allowed", "Contrôle autorisé"],
+    ["blocked", "Action bloquée"],
+    ["clarification_required", "Clarification nécessaire"],
+    ["escalation_required", "Intervention humaine requise"],
+    ["not_applicable", "Aucun contrôle applicable"],
+  ] as const)("maps guardrail status %s", (status, label) => {
+    expect(getGuardrailStatusLabel(status)).toBe(label);
+  });
+
+  it.each([
+    ["ambiguous_product", "Produit ambigu"],
+    ["stock_unverified", "Stock non vérifié"],
+    ["promotion_unverified", "Promotion non vérifiée"],
+    ["delivery_unverified", "Livraison non vérifiée"],
+    ["unsupported_restock", "Réassort non vérifiable"],
+    ["automation_limit", "Limite d’automatisation atteinte"],
+    ["unverifiable_result", "Résultat non vérifiable"],
+  ] as const)("maps guardrail category %s", (category, label) => {
+    expect(getGuardrailCategoryLabel(category)).toBe(label);
+  });
+});
+
+describe("TASK-032 activity projection", () => {
+  it("projects each real status as a separate ordered item", () => {
+    const first = applyActivityFrame([], { type: "agent.status", status: "planning" }, 1, 1);
+    const second = applyActivityFrame(first, { type: "agent.status", status: "planning" }, 1, 2);
+
+    expect(second).toEqual([
+      { id: 1, turnId: 1, kind: "status", label: "Planification de la prochaine action", state: "info" },
+      { id: 2, turnId: 1, kind: "status", label: "Planification de la prochaine action", state: "info" },
+    ]);
+  });
+
+  it("projects a guardrail with only mapped public details", () => {
+    expect(applyActivityFrame([], {
+      type: "agent.guardrail",
+      status: "clarification_required",
+      categories: ["ambiguous_product", "stock_unverified"],
+    }, 3, 7)).toEqual([{
+      id: 7,
+      turnId: 3,
+      kind: "guardrail",
+      label: "Clarification nécessaire",
+      state: "clarification",
+      details: ["Produit ambigu", "Stock non vérifié"],
+    }]);
+  });
+
+  it.each([
+    ["allowed", "allowed"],
+    ["blocked", "blocked"],
+    ["clarification_required", "clarification"],
+    ["escalation_required", "escalation"],
+    ["not_applicable", "neutral"],
+  ] as const)("projects guardrail status %s to UI state %s", (status, state) => {
+    const [item] = applyActivityFrame([], {
+      type: "agent.guardrail",
+      status,
+      categories: [],
+    }, 1, 1);
+
+    expect(item?.state).toBe(state);
+    expect(item?.label).toBe(getGuardrailStatusLabel(status));
+  });
+
+  it("creates a running item from a real tool start", () => {
+    expect(applyActivityFrame([], {
+      type: "agent.tool",
+      tool: "searchProducts",
+      status: "started",
+    }, 1, 1)).toEqual([{
+      id: 1,
+      turnId: 1,
+      kind: "tool",
+      label: "Recherche dans le catalogue",
+      state: "running",
+      toolKey: "searchProducts",
+    }]);
+  });
+
+  it.each([
+    [{ type: "agent.tool", tool: "searchProducts", status: "completed", outcome: "positive" }, "positive"],
+    [{ type: "agent.tool", tool: "searchProducts", status: "completed", outcome: "negative" }, "negative"],
+    [{ type: "agent.tool", tool: "searchProducts", status: "failed" }, "failed"],
+  ] as const)("updates a matching running tool to %s", (terminalFrame, state) => {
+    const started = applyActivityFrame([], {
+      type: "agent.tool",
+      tool: "searchProducts",
+      status: "started",
+    }, 2, 10);
+
+    const completed = applyActivityFrame(started, terminalFrame, 2, 11);
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ id: 10, turnId: 2, state });
+  });
+
+  it("keeps a negative outcome distinct from a technical failure", () => {
+    const negative = applyActivityFrame([], {
+      type: "agent.tool",
+      tool: "getAvailability",
+      status: "completed",
+      outcome: "negative",
+    }, 1, 1);
+    const failed = applyActivityFrame([], {
+      type: "agent.tool",
+      tool: "getAvailability",
+      status: "failed",
+    }, 1, 2);
+
+    expect(negative[0]?.state).toBe("negative");
+    expect(failed[0]?.state).toBe("failed");
+  });
+
+  it("matches the latest running occurrence of the same tool in the same turn", () => {
+    const earlierTurn = applyActivityFrame([], {
+      type: "agent.tool", tool: "searchProducts", status: "started",
+    }, 1, 1);
+    const currentTurn = applyActivityFrame(earlierTurn, {
+      type: "agent.tool", tool: "searchProducts", status: "started",
+    }, 2, 2);
+    const withOtherTool = applyActivityFrame(currentTurn, {
+      type: "agent.tool", tool: "getAvailability", status: "started",
+    }, 2, 3);
+
+    const completed = applyActivityFrame(withOtherTool, {
+      type: "agent.tool", tool: "searchProducts", status: "completed", outcome: "positive",
+    }, 2, 4);
+
+    expect(completed.map((item) => [item.id, item.turnId, item.state])).toEqual([
+      [1, 1, "running"],
+      [2, 2, "positive"],
+      [3, 2, "running"],
+    ]);
+  });
+
+  it("appends a terminal tool event when no matching start exists", () => {
+    expect(applyActivityFrame([], {
+      type: "agent.tool",
+      tool: "createOrder",
+      status: "completed",
+      outcome: "positive",
+    }, 4, 9)).toEqual([{
+      id: 9,
+      turnId: 4,
+      kind: "tool",
+      label: "Création de la commande",
+      state: "positive",
+      toolKey: "createOrder",
+    }]);
+  });
+
+  it("preserves arrival order and local turn IDs across different tools", () => {
+    const first = applyActivityFrame([], {
+      type: "agent.tool", tool: "searchProducts", status: "started",
+    }, 4, 20);
+    const second = applyActivityFrame(first, {
+      type: "agent.tool", tool: "getAvailability", status: "started",
+    }, 5, 21);
+
+    expect(second.map(({ id, turnId, label }) => ({ id, turnId, label }))).toEqual([
+      { id: 20, turnId: 4, label: "Recherche dans le catalogue" },
+      { id: 21, turnId: 5, label: "Vérification du stock" },
+    ]);
+  });
+
+  it("does not project agent.message or agent.error into activity", () => {
+    const existing = applyActivityFrame([], { type: "agent.status", status: "loading_context" }, 1, 1);
+
+    expect(applyActivityFrame(existing, { type: "agent.message", content: "Bonjour" }, 1, 2)).toEqual(existing);
+    expect(applyActivityFrame(existing, {
+      type: "agent.error", code: "graph_error", message: "private raw error",
+    }, 1, 3)).toEqual(existing);
+  });
+
+  it("retains no raw event or private backend fields in projected items", () => {
+    const activity = applyActivityFrame([], {
+      type: "agent.guardrail",
+      status: "blocked",
+      categories: ["delivery_unverified"],
+    }, 8, 12);
+    const serialized = JSON.stringify(activity);
+
+    expect(Object.keys(activity[0] ?? {}).sort()).toEqual(["details", "id", "kind", "label", "state", "turnId"]);
+    expect(serialized).not.toMatch(/activePlan|executedSteps|lastResult|lastError|args|result|customerId|conversationId|threadId|prompt|reasoning|sql|stack|secret/i);
   });
 });
