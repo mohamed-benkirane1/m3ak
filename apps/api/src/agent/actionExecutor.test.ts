@@ -135,6 +135,21 @@ describe("executeAction — SEARCH_PRODUCTS", () => {
     expect(outcome.resolvedRef).toBeNull();
   });
 
+  it("TASK-037: uses explicit Darija product text as the model criterion when family extraction is null", async () => {
+    const darijaState: M3AKState = {
+      ...baseState,
+      language: "darija",
+      messages: [{ role: "customer", content: "Bghit veste beige taille M" }],
+      extraction: { ...baseState.extraction, productQuery: "veste", family: null, color: "beige", size: "M" },
+    };
+    mockedSearchProducts.mockResolvedValueOnce([{ ...product, ref: "REF-0036", model: "Veste beige", color: "beige" }]);
+
+    const outcome = await executeAction("SEARCH_PRODUCTS", darijaState);
+
+    expect(mockedSearchProducts).toHaveBeenCalledExactlyOnceWith({ model: "veste", color: "beige", size: "M" });
+    expect(outcome.resolvedRef).toBe("REF-0036");
+  });
+
   it("zero results -> ok:false, resolvedRef null", async () => {
     mockedSearchProducts.mockResolvedValueOnce([]);
     const outcome = await executeAction("SEARCH_PRODUCTS", baseState);
@@ -145,7 +160,7 @@ describe("executeAction — SEARCH_PRODUCTS", () => {
   it("missing input (no family/color/size) -> no tool call", async () => {
     const stateNoCriteria: M3AKState = {
       ...baseState,
-      extraction: { ...baseState.extraction, family: null, color: null, size: null },
+      extraction: { ...baseState.extraction, productQuery: null, family: null, color: null, size: null },
     };
     const outcome = await executeAction("SEARCH_PRODUCTS", stateNoCriteria);
     expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });

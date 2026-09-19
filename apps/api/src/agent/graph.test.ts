@@ -1654,6 +1654,81 @@ describe("TASK-036 — discount negotiation (AC-04)", () => {
   });
 });
 
+describe("TASK-037 — Darija conversation scenario (AC-01, spec §10)", () => {
+  it("keeps a complete Darija sale on the planner/tool path and persists only grounded business truth", async () => {
+    const customerMessage = "Bghit veste beige taille M, wa7da l-Casa, livraison l 12 rue Atlas, nkhalles mlli twsel. Kan2kked talab.";
+    const product = {
+      ref: "REF-0036", model: "Veste beige", family: "Veste", color: "beige", size: "M",
+      price: 1140, stock: 14,
+    };
+    const filledCart = { id: "cart-037", version: 1, items: [{ productRef: "REF-0036", quantity: 1, unitPrice: 1140 }] };
+
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "darija", intent: "product_search", productQuery: "veste", family: null, color: "beige",
+      size: "M", quantity: 1, city: "Casablanca", address: "12 rue Atlas",
+      paymentMethod: "cash_on_delivery", confirmation: true, requestedPriceMad: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({
+      plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "CHECK_DELIVERY", "CREATE_ORDER", "RESPOND"],
+    });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [product], resolvedRef: "REF-0036" })
+      .mockResolvedValueOnce({
+        ok: true, result: { found: true, ref: "REF-0036", stock: 14, available: true }, resolvedRef: "REF-0036",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          found: true,
+          zone: { city: "Casablanca", fee: 25, delayHours: 72, cashOnDelivery: true, storePickup: true },
+          feeCents: 2500,
+        },
+        resolvedRef: "REF-0036",
+      })
+      .mockResolvedValueOnce({
+        ok: true, result: { created: true, order: { id: "order-037" } }, resolvedRef: "REF-0036", orderId: "order-037",
+      });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "Talab dyalk t2kked." });
+
+    const result = await invokeSalesGraph({
+      ...initialState,
+      threadId: "thread-037-darija",
+      conversationId: "conversation-037",
+      cart: filledCart,
+      messages: [{ role: "customer", content: customerMessage }],
+    });
+
+    expect(mockedExtractCustomerRequest).toHaveBeenCalledExactlyOnceWith(customerMessage);
+    expect(mockedPlanNextActions).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      language: "darija",
+      extraction: expect.objectContaining({
+        productQuery: "veste", color: "beige", size: "M", quantity: 1,
+        city: "Casablanca", paymentMethod: "cash_on_delivery", confirmation: true,
+      }),
+    }));
+    expect(mockedExecuteAction.mock.calls.map(([action]) => action)).toEqual([
+      "SEARCH_PRODUCTS", "CHECK_STOCK", "CHECK_DELIVERY", "CREATE_ORDER",
+    ]);
+    expect(mockedGenerateResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      language: "darija",
+      cart: filledCart,
+      orderId: "order-037",
+      humanInterventionNeeded: false,
+    }));
+    expect(result.messages.at(-1)).toEqual({
+      role: "assistant", content: "Talab dyalk t2kked.",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      language: "darija", cart: filledCart, orderId: "order-037", authorized: true,
+      clarificationNeeded: false, humanInterventionNeeded: false, escalationId: null,
+    }));
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(mockedPersistConversation).toHaveBeenCalledExactlyOnceWith(
+      "conversation-037", "darija", false, result.messages,
+    );
+  });
+});
+
 describe("persist — TASK-023 integration", () => {
   it("1: the normal terminal path calls persistConversation", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["RESPOND"] });

@@ -79,7 +79,15 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
   switch (action) {
     case "SEARCH_PRODUCTS": {
       const criteria: Record<string, string> = {};
-      if (state.extraction.family) criteria.family = state.extraction.family;
+      if (state.extraction.family) {
+        criteria.family = state.extraction.family;
+      } else if (state.extraction.productQuery && (!state.cart || state.cart.items.length === 0)) {
+        // TASK-037: Darija extraction may correctly identify the requested
+        // product text without promoting it to the catalogue's family slot.
+        // Keep that explicit customer text on the deterministic tool path
+        // instead of degrading to an ambiguous color/size-only search.
+        criteria.model = state.extraction.productQuery;
+      }
       if (state.extraction.color) criteria.color = state.extraction.color;
       if (state.extraction.size) criteria.size = state.extraction.size;
 
