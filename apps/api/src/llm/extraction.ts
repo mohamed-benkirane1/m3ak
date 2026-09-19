@@ -70,7 +70,7 @@ Return ONLY a single raw JSON object, with EXACTLY these keys, every time, no mo
 
 Rules:
 - language: use "unknown" only if you truly cannot tell.
-- intent: use "unknown" if the request cannot be safely classified. Never null, never omitted.
+- intent: use exactly "out_of_domain" when the request is unrelated to the shop's products, sales, promotions, delivery, orders, or commercial support. Otherwise classify the commercial intent, or use "unknown" if it cannot be safely classified. Never null, never omitted.
 - productQuery/family/color/size/city/address: use null if not stated or not safe to infer. Never fabricate. Never an empty string.
 - Change of mind (e.g. "finalement...", "plutôt...", "non, je veux...", "je préfère...", "pas noir, plutôt beige", "X à la place de Y"): when the customer's message states both a rejected value and a newly desired one for the same slot, extract ONLY the newly desired value for that slot — never the rejected one, and never both, and never null when a new value was clearly given.
 - quantity: a positive integer only if the customer stated one; otherwise null. Never default to 1.

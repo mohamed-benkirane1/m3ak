@@ -111,6 +111,19 @@ describe("extractCustomerRequest — core success cases (A-E)", () => {
     expect(result.productQuery).toBeNull();
     expect(result.confirmation).toBeNull();
   });
+
+  it("TASK-038: classifies a request unrelated to the shop as out_of_domain", async () => {
+    mockedFastChat.mockResolvedValueOnce(
+      JSON.stringify(validExtractionJson({
+        intent: "out_of_domain", productQuery: null, color: null, size: null,
+      })),
+    );
+
+    const result = await extractCustomerRequest("Donne-moi le score du prochain match du Raja");
+
+    expect(result.intent).toBe("out_of_domain");
+    expect(result.productQuery).toBeNull();
+  });
 });
 
 describe("input validation (before any fastChat call)", () => {
@@ -167,6 +180,7 @@ describe("prompt contract", () => {
     expect(systemContent).toMatch(/no code fences/i);
     expect(systemContent).toContain('"language"');
     expect(systemContent).toContain('"intent"');
+    expect(systemContent).toContain('"out_of_domain"');
     expect(systemContent).toContain('"productQuery"');
     expect(systemContent).toContain('"family"');
     expect(systemContent).toContain('"color"');

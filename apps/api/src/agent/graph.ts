@@ -206,6 +206,18 @@ async function planFresh(state: M3AKState) {
 // (no LLM call) and only calls planNextActions again (real "révision") when
 // the plan is exhausted or the latest tool observation failed.
 async function router(state: M3AKState) {
+  // TASK-038: once semantic extraction has identified an out-of-domain
+  // request, no sales tool or unconstrained response path is appropriate.
+  // Route deterministically to the existing persisted human-escalation path,
+  // regardless of any stale plan that may exist in the incoming state.
+  if (state.intent === "out_of_domain") {
+    return {
+      activePlan: ["ESCALATE" as const],
+      nextAction: "ESCALATE" as const,
+      lastError: null,
+    };
+  }
+
   if (state.iterationCount >= getMaxAgentSteps()) {
     return {
       nextAction: null,

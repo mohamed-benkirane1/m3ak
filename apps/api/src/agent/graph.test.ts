@@ -1729,6 +1729,64 @@ describe("TASK-037 — Darija conversation scenario (AC-01, spec §10)", () => {
   });
 });
 
+describe("TASK-038 — out-of-domain escalation", () => {
+  it("bypasses sales tools, persists a human escalation, and returns only the controlled handoff response", async () => {
+    const customerMessage = "Peux-tu me donner le score du prochain match du Raja et me dire qui va gagner ?";
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "out_of_domain", productQuery: null, family: null, color: null,
+      size: null, quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+      requestedPriceMad: null,
+    });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true,
+      replayed: false,
+      escalation: {
+        id: "escalation-038", conversationId: "conversation-038", reason: "orchestrator_requested_escalation",
+        contextSummary: "intent=out_of_domain; executedSteps=[]; guardrailReasons=[]; lastError=none",
+        status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+    mockedGenerateResponse.mockResolvedValueOnce({
+      content: "Votre demande a été transmise à notre équipe pour un traitement personnalisé.",
+    });
+
+    const result = await invokeSalesGraph({
+      ...initialState,
+      threadId: "thread-038-out-of-domain",
+      conversationId: "conversation-038",
+      messages: [{ role: "customer", content: customerMessage }],
+      // A stale sales plan must never leak into this newly classified turn.
+      activePlan: ["SEARCH_PRODUCTS", "CHECK_STOCK"],
+      nextAction: "SEARCH_PRODUCTS",
+    });
+
+    expect(mockedExtractCustomerRequest).toHaveBeenCalledExactlyOnceWith(customerMessage);
+    expect(mockedPlanNextActions).not.toHaveBeenCalled();
+    expect(mockedExecuteAction).not.toHaveBeenCalled();
+    expect(mockedCreateEscalation).toHaveBeenCalledExactlyOnceWith(
+      "conversation-038",
+      "orchestrator_requested_escalation",
+      "intent=out_of_domain; executedSteps=[]; guardrailReasons=[]; lastError=none",
+    );
+    expect(mockedGenerateResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      intent: "out_of_domain",
+      humanInterventionNeeded: true,
+      escalationId: "escalation-038",
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      intent: "out_of_domain", activePlan: ["ESCALATE"], nextAction: "ESCALATE",
+      humanInterventionNeeded: true, escalationId: "escalation-038",
+    }));
+    expect(result.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "Votre demande a été transmise à notre équipe pour un traitement personnalisé.",
+    });
+    expect(mockedPersistConversation).toHaveBeenCalledExactlyOnceWith(
+      "conversation-038", "french", true, result.messages,
+    );
+  });
+});
+
 describe("persist — TASK-023 integration", () => {
   it("1: the normal terminal path calls persistConversation", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["RESPOND"] });
