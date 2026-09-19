@@ -1,4 +1,5 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
+import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
@@ -10,6 +11,31 @@ import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state"
 // Real node behavior belongs to later tasks (see design.md §7, tasks.md §8-9).
 function noop(_state: M3AKState) {
   return {};
+}
+
+// TASK-023: rehydrates an EXISTING conversation found by threadId. Never
+// creates one (conversations.customer_id is NOT NULL and nothing upstream
+// can currently supply a trusted customer identity — TASK-023A §10). Persisted
+// history is prepended to whatever messages this invocation was already
+// given, never dropped.
+async function loadContext(state: M3AKState) {
+  const result = await loadConversationContext(state.threadId);
+
+  if (!result.found) {
+    return {};
+  }
+
+  return {
+    conversationId: result.conversation.id,
+    customerId: result.conversation.customerId,
+    language: result.conversation.language,
+    messages: [
+      ...result.messages.map((message) => ({ role: message.role, content: message.content })),
+      ...state.messages,
+    ],
+    cart: result.cart,
+    escalationId: result.escalationId,
+  };
 }
 
 // Design decision, not an official sourced value (TASK-020A): no config
@@ -195,18 +221,50 @@ function routeAfterGuardrail(state: M3AKState): "escalation" | "response" {
   return state.humanInterventionNeeded ? "escalation" : "response";
 }
 
+// TASK-023: persists the final conversational state. Skips (never fabricates
+// an ID) when no conversation was ever loaded/established this turn.
+// TASK-023B: runs last in the topology, so it must never overwrite an
+// already-present upstream lastError (escalation/orchestrator/step-limit) —
+// a controlled persistence skip/failure is only recorded when no earlier
+// node has already reported something more important. Unexpected thrown
+// DB/programmer errors are never caught here and still propagate as-is.
+async function persist(state: M3AKState) {
+  if (state.conversationId === null) {
+    if (state.lastError !== null) {
+      return {};
+    }
+    return { lastError: "conversation_persistence_skipped: missing_conversation_id" };
+  }
+
+  const result = await persistConversation(
+    state.conversationId,
+    state.language,
+    state.escalationId !== null,
+    state.messages,
+  );
+
+  if (!result.persisted) {
+    if (state.lastError !== null) {
+      return {};
+    }
+    return { lastError: `conversation_persistence_failed: ${result.reason}` };
+  }
+
+  return {};
+}
+
 // Uncompiled builder: topology only, no side effects. TASK-024 can compile
 // this same builder with a checkpointer without touching node/edge wiring.
 export function buildSalesGraph() {
   return new StateGraph(M3AKStateObjectSchema)
-    .addNode("loadContext", noop)
+    .addNode("loadContext", loadContext)
     .addNode("conversation", noop)
     .addNode("router", router)
     .addNode("tool", tool)
     .addNode("guardrail", guardrail)
     .addNode("escalation", escalation)
     .addNode("response", noop)
-    .addNode("persist", noop)
+    .addNode("persist", persist)
     .addEdge(START, "loadContext")
     .addEdge("loadContext", "conversation")
     .addEdge("conversation", "router")

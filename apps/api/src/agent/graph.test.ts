@@ -16,6 +16,11 @@ vi.mock("../escalation/escalation", () => ({
   createEscalation: vi.fn(),
 }));
 
+vi.mock("../conversation/conversation", () => ({
+  loadConversationContext: vi.fn(),
+  persistConversation: vi.fn(),
+}));
+
 // Partial mock: defaults to the REAL guardrail logic (via vi.fn(actual...)) so
 // every existing TASK-021 integration test keeps exercising real behavior;
 // only the one test that needs to prove escalation's own join-logic in
@@ -29,6 +34,7 @@ vi.mock("./guardrails", async (importOriginal) => {
   };
 });
 
+import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
@@ -41,11 +47,31 @@ const mockedPlanNextActions = vi.mocked(planNextActions);
 const mockedExecuteAction = vi.mocked(executeAction);
 const mockedCreateEscalation = vi.mocked(createEscalation);
 const mockedEvaluateCommercialGuardrails = vi.mocked(evaluateCommercialGuardrails);
+const mockedLoadConversationContext = vi.mocked(loadConversationContext);
+const mockedPersistConversation = vi.mocked(persistConversation);
+
+const DEFAULT_PERSISTED_CONVERSATION = {
+  id: "default-conversation",
+  customerId: "default-customer",
+  status: "active" as const,
+  language: "unknown" as const,
+  createdAt: "2026-09-19T00:00:00.000Z",
+  updatedAt: "2026-09-19T00:00:00.000Z",
+};
 
 let originalMaxAgentSteps: string | undefined;
 
 beforeEach(() => {
   originalMaxAgentSteps = process.env.MAX_AGENT_STEPS;
+  // Sensible defaults for every pre-existing test that never mentions
+  // conversation persistence: no conversation found on load (a safe {}
+  // no-op), successful persist on write (also {} — never touches lastError).
+  mockedLoadConversationContext.mockResolvedValue({ found: false });
+  mockedPersistConversation.mockResolvedValue({
+    persisted: true,
+    conversation: DEFAULT_PERSISTED_CONVERSATION,
+    newMessageCount: 0,
+  });
 });
 
 afterEach(() => {
@@ -369,6 +395,9 @@ describe("loop — recognized LLM transport error during revision", () => {
   it("resolves the graph with a safe category-based lastError instead of crashing", async () => {
     mockedPlanNextActions.mockRejectedValueOnce(new LlmError("timeout_error", "LLM request timed out after 60000ms"));
 
+    // TASK-023B: persist runs last but must never overwrite an already-set
+    // lastError, so initialState (conversationId: null) exercises the real
+    // precedence rule instead of needing a fake conversationId to dodge it.
     const result = await invokeSalesGraph(initialState);
 
     expect(result.activePlan).toEqual([]);
@@ -658,7 +687,12 @@ describe("escalation — TASK-022 integration", () => {
 
     expect(mockedCreateEscalation).not.toHaveBeenCalled();
     expect(result.escalationId).toBeNull();
+    // TASK-023B: escalation's own error has precedence. persist runs
+    // afterward (escalation -> response -> persist), also detects the same
+    // missing conversationId, but must never overwrite an already-set
+    // lastError — the true earlier failure survives unchanged.
     expect(result.lastError).toBe("escalation_creation_failed: missing_conversation_id");
+    expect(mockedPersistConversation).not.toHaveBeenCalled();
   });
 
   it("8: conversation_not_found -> escalationId stays null, controlled lastError", async () => {
@@ -744,6 +778,262 @@ describe("escalation — TASK-022 integration", () => {
     expect(result.messages).toEqual(stateForNoop.messages);
     expect(result.summary).toBe(stateForNoop.summary);
     expect(result.threadId).toBe(stateForNoop.threadId);
+  });
+});
+
+describe("loadContext — TASK-023 integration", () => {
+  const FOUND_CONVERSATION = {
+    id: "conversation-loaded",
+    customerId: "customer-loaded",
+    status: "active" as const,
+    language: "darija" as const,
+    createdAt: "2026-09-18T10:00:00.000Z",
+    updatedAt: "2026-09-19T09:00:00.000Z",
+  };
+
+  it("1: a found conversation populates conversationId/customerId/language/cart/escalationId", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: FOUND_CONVERSATION,
+      messages: [],
+      cart: { id: "cart-loaded", version: 1, items: [] },
+      escalationId: "escalation-loaded",
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.conversationId).toBe("conversation-loaded");
+    expect(result.customerId).toBe("customer-loaded");
+    expect(result.language).toBe("darija");
+    expect(result.cart).toEqual({ id: "cart-loaded", version: 1, items: [] });
+    expect(result.escalationId).toBe("escalation-loaded");
+  });
+
+  it("2: persisted messages are prepended to incoming current-invocation messages", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: FOUND_CONVERSATION,
+      messages: [
+        {
+          id: "m1", conversationId: "conversation-loaded", role: "customer",
+          content: "old message", createdAt: "2026-09-18T10:00:00.000Z",
+        },
+      ],
+      cart: null,
+      escalationId: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const stateWithIncoming: M3AKState = {
+      ...initialState,
+      messages: [{ role: "customer", content: "new message this turn" }],
+    };
+    const result = await invokeSalesGraph(stateWithIncoming);
+
+    expect(result.messages).toEqual([
+      { role: "customer", content: "old message" },
+      { role: "customer", content: "new message this turn" },
+    ]);
+  });
+
+  it("3: unknown thread leaves initial values unchanged", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({ found: false });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.conversationId).toBeNull();
+    expect(result.customerId).toBeNull();
+    expect(result.language).toBe("unknown");
+    expect(result.cart).toBeNull();
+    expect(result.escalationId).toBeNull();
+    expect(result.messages).toEqual([]);
+  });
+
+  it("4: a load DB exception propagates, not swallowed", async () => {
+    mockedLoadConversationContext.mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(invokeSalesGraph(initialState)).rejects.toThrow("connection lost");
+  });
+
+  it("5: no customer-memory side effects — only the six owned fields ever change", async () => {
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true, conversation: FOUND_CONVERSATION, messages: [], cart: null, escalationId: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.orderId).toBeNull();
+    expect(result.followupId).toBeNull();
+    expect(result.authorized).toBeNull();
+    expect(result.activePlan).toEqual([]);
+    expect(result.executedSteps).toEqual([]);
+  });
+});
+
+describe("persist — TASK-023 integration", () => {
+  it("1: the normal terminal path calls persistConversation", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["RESPOND"] });
+
+    await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("2: the explicit ESCALATE path calls persist after escalation", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["ESCALATE"] });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-x", conversationId: "conversation-abc", reason: "orchestrator_requested_escalation",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+
+    await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("3: the step-limit escalation path also calls persist", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-y", conversationId: "conversation-abc", reason: "agent_step_limit_reached",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+
+    await invokeSalesGraph({ ...stateWithRef, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("4: hasOpenEscalation is derived only from escalationId !== null (true case)", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc", escalationId: "pre-existing-escalation" });
+
+    expect(mockedPersistConversation.mock.calls[0]?.[2]).toBe(true);
+  });
+
+  it("4b: hasOpenEscalation is false when escalationId is null", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation.mock.calls[0]?.[2]).toBe(false);
+  });
+
+  it("5/6: the exact state language and cumulative messages are passed through", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const stateForPersist: M3AKState = {
+      ...initialState, conversationId: "conversation-abc", language: "darija",
+      messages: [{ role: "customer", content: "hello" }],
+    };
+    await invokeSalesGraph(stateForPersist);
+
+    expect(mockedPersistConversation.mock.calls[0]?.[1]).toBe("darija");
+    expect(mockedPersistConversation.mock.calls[0]?.[3]).toEqual([{ role: "customer", content: "hello" }]);
+  });
+
+  it("7: missing conversationId -> no domain call, controlled skipped lastError", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedPersistConversation).not.toHaveBeenCalled();
+    expect(result.lastError).toBe("conversation_persistence_skipped: missing_conversation_id");
+  });
+
+  it("8: conversation_not_found -> controlled failed lastError", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedPersistConversation.mockResolvedValueOnce({ persisted: false, reason: "conversation_not_found" });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(result.lastError).toBe("conversation_persistence_failed: conversation_not_found");
+  });
+
+  it("TASK-023B/E: conversation_not_found with a pre-existing lastError preserves the prior error, even though the domain call still happens", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-z", conversationId: "conversation-abc", reason: "agent_step_limit_reached",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+    mockedPersistConversation.mockResolvedValueOnce({ persisted: false, reason: "conversation_not_found" });
+
+    // Router hits the step limit (lastError: "agent_step_limit_reached"), then
+    // escalation succeeds (no lastError key -> the router's message survives),
+    // so persist must find lastError already non-null and preserve it exactly,
+    // despite calling persistConversation and getting a controlled failure.
+    const result = await invokeSalesGraph({ ...stateWithRef, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+    expect(result.lastError).toBe("agent_step_limit_reached");
+  });
+
+  it("9: a successful persist returns no other state mutation", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(result.lastError).toBeNull();
+  });
+
+  it("TASK-023B: a successful persist never clears a pre-existing lastError", async () => {
+    process.env.MAX_AGENT_STEPS = "1";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK", "CHECK_STOCK"] });
+    mockedExecuteAction.mockResolvedValue({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedCreateEscalation.mockResolvedValueOnce({
+      created: true, replayed: false,
+      escalation: {
+        id: "escalation-w", conversationId: "conversation-abc", reason: "agent_step_limit_reached",
+        contextSummary: "x", status: "open", createdAt: "2026-09-19T00:00:00.000Z",
+      },
+    });
+    // Default beforeEach mock: persistConversation resolves persisted:true.
+
+    const result = await invokeSalesGraph({ ...stateWithRef, conversationId: "conversation-abc" });
+
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+    expect(result.lastError).toBe("agent_step_limit_reached");
+  });
+
+  it("10: a thrown DB error from persistConversation rejects invokeSalesGraph, not swallowed", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    mockedPersistConversation.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await expect(invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" })).rejects.toThrow(
+      "DB connection lost",
+    );
+  });
+
+  it("11-15: TASK-020/021/022 behavior, response no-op, and checkpointing remain unaffected", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-001" }], resolvedRef: "REF-001" })
+      .mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+
+    const result = await invokeSalesGraph({ ...initialState, conversationId: "conversation-abc" });
+
+    expect(result.executedSteps).toEqual(["SEARCH_PRODUCTS", "CHECK_STOCK"]);
+    expect(result.authorized).toBe(true);
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(mockedPersistConversation).toHaveBeenCalledTimes(1);
+    // response remains no-op: nothing beyond the loop's own approved fields changed.
+    expect(result.messages).toEqual([]);
   });
 });
 
