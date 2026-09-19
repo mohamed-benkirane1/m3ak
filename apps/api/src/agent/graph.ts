@@ -1,5 +1,6 @@
-import { END, START, StateGraph } from "@langchain/langgraph";
+import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
+import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
@@ -253,8 +254,9 @@ async function persist(state: M3AKState) {
   return {};
 }
 
-// Uncompiled builder: topology only, no side effects. TASK-024 can compile
-// this same builder with a checkpointer without touching node/edge wiring.
+// Uncompiled builder: topology only, no side effects. compileSalesGraph()
+// compiles this same builder with a checkpointer without touching node/edge
+// wiring (TASK-024).
 export function buildSalesGraph() {
   return new StateGraph(M3AKStateObjectSchema)
     .addNode("loadContext", loadContext)
@@ -276,16 +278,46 @@ export function buildSalesGraph() {
     .addEdge("persist", END);
 }
 
-export function compileSalesGraph() {
-  return buildSalesGraph().compile();
+// TASK-024: defaults to the production PostgreSQL checkpointer singleton;
+// tests inject a MemorySaver (or a mock) instead — never a second production
+// checkpointer/pool.
+export function compileSalesGraph(checkpointer: BaseCheckpointSaver = langgraphCheckpointer) {
+  return buildSalesGraph().compile({ checkpointer });
 }
 
 // M3AKStateObjectSchema (used above for LangGraph channel construction) does
 // not reproduce M3AKStateSchema's whole-root JSON-safety boundary, so both
 // entry and exit are validated explicitly through the outer schema here.
+//
+// TASK-024: an ordinary invoke is always a NEW business turn — the full,
+// fresh M3AKState is transmitted every time (never a partial/delta state),
+// and state.threadId is transmitted as configurable.thread_id so the run is
+// checkpointed under the conversation's own LangGraph thread. This is not
+// the interrupted-run resume path — see resumeInterruptedSalesGraph below.
 export async function invokeSalesGraph(input: unknown): Promise<M3AKState> {
   const validatedInput = M3AKStateSchema.parse(input);
   const compiled = compileSalesGraph();
-  const result = await compiled.invoke(validatedInput);
+  const result = await compiled.invoke(validatedInput, {
+    configurable: { thread_id: validatedInput.threadId },
+  });
+  return M3AKStateSchema.parse(result);
+}
+
+// TASK-024: resumes a run that was interrupted mid-execution (e.g. a process
+// restart) on the SAME thread_id — this is never a new business turn, so it
+// deliberately takes only a threadId, never messages/conversationId/cart/
+// intent/etc: a partial/delta business state is explicitly out of scope.
+// Passing `null` as input (proven empirically, TASK-024C) makes LangGraph
+// skip START and re-enter the last incomplete task directly, restoring
+// whatever channel values the interrupted run's already-completed steps had
+// checkpointed. A missing/never-started checkpoint or a genuine checkpointer/
+// DB/programmer error is never caught here — it propagates unchanged, exactly
+// like invokeSalesGraph.
+export async function resumeInterruptedSalesGraph(rawThreadId: unknown): Promise<M3AKState> {
+  const threadId = M3AKStateObjectSchema.shape.threadId.parse(rawThreadId);
+  const compiled = compileSalesGraph();
+  const result = await compiled.invoke(null, {
+    configurable: { thread_id: threadId },
+  });
   return M3AKStateSchema.parse(result);
 }

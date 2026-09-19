@@ -21,6 +21,19 @@ vi.mock("../conversation/conversation", () => ({
   persistConversation: vi.fn(),
 }));
 
+// TASK-024: a real MemorySaver stands in for the production PostgreSQL
+// checkpointer (decision #2 — MemorySaver is permitted only in tests). It is
+// constructed via a dynamic import inside the factory to avoid referencing
+// any hoisted outer-scope binding. One shared instance backs the whole file:
+// this is safe because an ordinary full-state invoke always overwrites every
+// LastValue channel regardless of what the checkpointer already holds
+// (TASK-024B/C), so no pre-existing test can be affected by checkpoint reuse
+// across different thread_ids.
+vi.mock("../infrastructure/langgraphCheckpointer", async () => {
+  const { MemorySaver } = await import("@langchain/langgraph");
+  return { langgraphCheckpointer: new MemorySaver() };
+});
+
 // Partial mock: defaults to the REAL guardrail logic (via vi.fn(actual...)) so
 // every existing TASK-021 integration test keeps exercising real behavior;
 // only the one test that needs to prove escalation's own join-logic in
@@ -34,11 +47,13 @@ vi.mock("./guardrails", async (importOriginal) => {
   };
 });
 
+import { MemorySaver } from "@langchain/langgraph";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
+import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
 import { LlmError } from "../llm/reasoningClient";
 import { createEscalation } from "../escalation/escalation";
 import { executeAction } from "./actionExecutor";
-import { buildSalesGraph, compileSalesGraph, invokeSalesGraph } from "./graph";
+import { buildSalesGraph, compileSalesGraph, invokeSalesGraph, resumeInterruptedSalesGraph } from "./graph";
 import { evaluateCommercialGuardrails } from "./guardrails";
 import { OrchestratorError, planNextActions } from "./orchestrator";
 import type { M3AKState } from "./state";
@@ -166,9 +181,118 @@ describe("buildSalesGraph / compileSalesGraph", () => {
     expect(typeof builder.compile).toBe("function");
   });
 
-  it("compiles without a checkpointer", () => {
+  it("A: compileSalesGraph() compiles with a real checkpointer wired in by default (TASK-024)", async () => {
     const compiled = compileSalesGraph();
     expect(typeof compiled.invoke).toBe("function");
+
+    // getState() only succeeds when a real BaseCheckpointSaver is actually
+    // wired in — a checkpointer-less compile throws instead. This is the
+    // observable proof that a checkpointer is present by default.
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    const config = { configurable: { thread_id: "checkpointer-presence-check" } };
+    await compiled.invoke(initialState, config);
+    const snapshot = await compiled.getState(config);
+    expect(snapshot.values).toBeDefined();
+  });
+
+  it("A2: compileSalesGraph accepts an explicit injected checkpointer override, for testability", () => {
+    const compiled = compileSalesGraph(new MemorySaver());
+    expect(typeof compiled.invoke).toBe("function");
+  });
+});
+
+describe("invokeSalesGraph — TASK-024 ordinary-turn checkpointer contract", () => {
+  it("B: configurable.thread_id transmitted to the checkpointer matches state.threadId exactly", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+    const getTupleSpy = vi.spyOn(langgraphCheckpointer, "getTuple");
+
+    await invokeSalesGraph({ ...initialState, threadId: "thread-b-contract-check" });
+
+    expect(getTupleSpy).toHaveBeenCalled();
+    const firstCallConfig = getTupleSpy.mock.calls[0]?.[0] as { configurable?: { thread_id?: string } };
+    expect(firstCallConfig.configurable?.thread_id).toBe("thread-b-contract-check");
+
+    getTupleSpy.mockRestore();
+  });
+
+  it("C: an ordinary invoke still transmits the full fresh M3AKState — no field is silently dropped", async () => {
+    const stateForFullPassthrough: M3AKState = {
+      ...populatedState,
+      activePlan: [],
+      nextAction: null,
+      threadId: "thread-c-fullstate-check",
+    };
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(stateForFullPassthrough);
+
+    // loadContext finds no conversation (default mock) and never touches
+    // these fields, so whatever the graph returns for them must be exactly
+    // what invokeSalesGraph's own input carried through — proving the full
+    // state, not a partial/delta one, is what actually reaches the graph.
+    expect(result.customerId).toBe(stateForFullPassthrough.customerId);
+    expect(result.summary).toBe(stateForFullPassthrough.summary);
+    expect(result.intent).toBe(stateForFullPassthrough.intent);
+    expect(result.extraction).toEqual(stateForFullPassthrough.extraction);
+    expect(result.cartTotalCents).toBe(stateForFullPassthrough.cartTotalCents);
+  });
+});
+
+describe("resumeInterruptedSalesGraph — TASK-024 interrupted-run resume contract", () => {
+  it("D/F: resumes the exact interrupted thread via a null-input invoke, never replaying the already-completed loadContext task", async () => {
+    const threadId = "thread-resume-def";
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_STOCK"] });
+    mockedExecuteAction.mockRejectedValueOnce(new Error("transient-executor-failure"));
+
+    await expect(invokeSalesGraph({ ...initialState, threadId })).rejects.toThrow("transient-executor-failure");
+    expect(mockedLoadConversationContext).toHaveBeenCalledTimes(1);
+
+    mockedExecuteAction.mockResolvedValueOnce({ ok: true, result: { found: true, available: true }, resolvedRef: "REF-001" });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    // Passing the SAME threadId and succeeding proves F (exact thread_id
+    // reuse) — a mismatched thread_id would find no checkpoint and reject
+    // exactly like test E below.
+    const result = await resumeInterruptedSalesGraph(threadId);
+
+    // loadContext already completed before the crash and is not replayed:
+    // still exactly one call across both the failed invoke and the resume.
+    expect(mockedLoadConversationContext).toHaveBeenCalledTimes(1);
+    expect(result.executedSteps).toEqual(["CHECK_STOCK"]);
+  });
+
+  it("E: transmits null as the LangGraph input — proven by rejecting on a thread with no prior checkpoint at all", async () => {
+    await expect(resumeInterruptedSalesGraph("thread-with-no-checkpoint-ever")).rejects.toThrow();
+
+    // If a full/default state had been fabricated instead of null, this
+    // would have run a brand-new turn from START and called loadContext.
+    expect(mockedLoadConversationContext).not.toHaveBeenCalled();
+  });
+
+  it("G: a checkpointer/DB error during resume propagates, never becomes a controlled or swallowed result", async () => {
+    const getTupleSpy = vi
+      .spyOn(langgraphCheckpointer, "getTuple")
+      .mockRejectedValueOnce(new Error("checkpoint store unreachable"));
+
+    await expect(resumeInterruptedSalesGraph("thread-checkpointer-error")).rejects.toThrow(
+      "checkpoint store unreachable",
+    );
+
+    getTupleSpy.mockRestore();
+  });
+
+  it("H: two distinct thread_ids remain isolated under the shared checkpointer", async () => {
+    mockedPlanNextActions.mockResolvedValue({ plan: [] });
+
+    await invokeSalesGraph({ ...initialState, threadId: "iso-thread-a", language: "darija" });
+    await invokeSalesGraph({ ...initialState, threadId: "iso-thread-b", language: "french" });
+
+    const compiled = compileSalesGraph();
+    const snapshotA = await compiled.getState({ configurable: { thread_id: "iso-thread-a" } });
+    const snapshotB = await compiled.getState({ configurable: { thread_id: "iso-thread-b" } });
+
+    expect((snapshotA.values as M3AKState).language).toBe("darija");
+    expect((snapshotB.values as M3AKState).language).toBe("french");
   });
 });
 
