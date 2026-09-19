@@ -82,6 +82,9 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql://m3ak:m3ak-local-dev-only@postgres:5432/m3ak_dev}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LLM_URL: ${LLM_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_FAST_MODEL: ${LLM_FAST_MODEL:-}
     depends_on:
       postgres:
         condition: service_healthy

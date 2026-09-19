@@ -16,6 +16,11 @@ const { mockWorkerClose, mockWorkerOn, MockWorkerCtor, mockCreateNodeRedisClient
   return { mockWorkerClose, mockWorkerOn, MockWorkerCtor, mockCreateNodeRedisClient, mockCreateClient };
 });
 
+const { mockExecuteFollowup, mockMarkFailed } = vi.hoisted(() => ({
+  mockExecuteFollowup: vi.fn(),
+  mockMarkFailed: vi.fn(),
+}));
+
 vi.mock("bullmq", () => ({
   Worker: MockWorkerCtor,
   createNodeRedisClient: mockCreateNodeRedisClient,
@@ -23,6 +28,11 @@ vi.mock("bullmq", () => ({
 
 vi.mock("redis", () => ({
   createClient: mockCreateClient,
+}));
+
+vi.mock("./followupExecution", () => ({
+  executeFollowup: mockExecuteFollowup,
+  markFollowupExecutionFailed: mockMarkFailed,
 }));
 
 // followupWorker.ts holds true module-level singleton state (worker + its
@@ -36,65 +46,166 @@ beforeEach(() => {
   mockWorkerOn.mockClear();
   mockCreateNodeRedisClient.mockClear();
   mockCreateClient.mockClear();
+  mockExecuteFollowup.mockReset();
+  mockMarkFailed.mockReset();
 });
 
 const VALID_FOLLOWUP_ID = "11111111-1111-4111-8111-111111111111";
 
-function fakeJob(overrides: Partial<{ name: string; data: unknown; id: string }> = {}): Job {
-  return { name: FOLLOWUP_JOB_NAME, data: { followupId: VALID_FOLLOWUP_ID }, id: "job-1", ...overrides } as Job;
+function fakeJob(
+  overrides: Partial<{
+    name: string;
+    data: unknown;
+    id: string;
+    attemptsStarted: number;
+    attemptsMade: number;
+    opts: { attempts?: number };
+  }> = {},
+): Job {
+  return {
+    name: FOLLOWUP_JOB_NAME,
+    data: { followupId: VALID_FOLLOWUP_ID },
+    id: "job-1",
+    attemptsStarted: 1,
+    attemptsMade: 0,
+    opts: { attempts: 3 },
+    ...overrides,
+  } as unknown as Job;
 }
 
-describe("processFollowupJob — job name / payload validation (3, 4, 5, 6, 7, 8)", () => {
-  it("3/8: accepts the exact job name execute-followup, reaches the processor, and fails explicitly — never succeeds", async () => {
-    const { processFollowupJob, FollowupExecutionNotImplementedError } = await import("./followupWorker");
-
-    await expect(processFollowupJob(fakeJob())).rejects.toBeInstanceOf(FollowupExecutionNotImplementedError);
-  });
-
-  it("4: any other job name is explicitly rejected", async () => {
+describe("processFollowupJob — job name / payload validation", () => {
+  it("rejects any job name other than execute-followup, never calls executeFollowup", async () => {
     const { processFollowupJob } = await import("./followupWorker");
 
     await expect(processFollowupJob(fakeJob({ name: "some-other-job" }))).rejects.toThrow(/unexpected_job_name/);
+
+    expect(mockExecuteFollowup).not.toHaveBeenCalled();
   });
 
-  it("5: a valid UUID followupId payload is accepted and reaches the not-implemented failure", async () => {
-    const { processFollowupJob, FollowupExecutionNotImplementedError } = await import("./followupWorker");
-    const followupId = "22222222-2222-4222-8222-222222222222";
+  it("rejects a malformed (non-UUID) followupId before executeFollowup is ever called", async () => {
+    const { processFollowupJob } = await import("./followupWorker");
 
-    const error = await processFollowupJob(fakeJob({ data: { followupId } })).catch((e: unknown) => e);
+    await expect(processFollowupJob(fakeJob({ data: { followupId: "not-a-uuid" } }))).rejects.toThrow();
 
-    expect(error).toBeInstanceOf(FollowupExecutionNotImplementedError);
-    expect((error as InstanceType<typeof FollowupExecutionNotImplementedError>).followupId).toBe(followupId);
+    expect(mockExecuteFollowup).not.toHaveBeenCalled();
   });
 
-  it("6: a malformed followupId (not a UUID) is rejected before reaching the not-implemented failure", async () => {
-    const { processFollowupJob, FollowupExecutionNotImplementedError } = await import("./followupWorker");
-
-    const error = await processFollowupJob(fakeJob({ data: { followupId: "not-a-uuid" } })).catch((e: unknown) => e);
-
-    expect(error).not.toBeInstanceOf(FollowupExecutionNotImplementedError);
-  });
-
-  it("7: extra business-snapshot fields are rejected by the strict payload schema", async () => {
-    const { processFollowupJob, FollowupExecutionNotImplementedError } = await import("./followupWorker");
+  it("rejects extra business-snapshot fields via the strict payload schema, never calls executeFollowup", async () => {
     const data = {
       followupId: "33333333-3333-4333-8333-333333333333",
       conversationId: "leaked-conversation",
       message: "leaked message content",
     };
-
-    const error = await processFollowupJob(fakeJob({ data })).catch((e: unknown) => e);
-
-    expect(error).not.toBeInstanceOf(FollowupExecutionNotImplementedError);
-  });
-
-  it("8: the stable failure message names TASK-028 and carries the real followupId, never a generic error", async () => {
     const { processFollowupJob } = await import("./followupWorker");
 
-    const error = await processFollowupJob(fakeJob()).catch((e: unknown) => e as Error);
+    await expect(processFollowupJob(fakeJob({ data }))).rejects.toThrow();
 
-    expect(error.message).toContain("followup_execution_not_implemented");
-    expect(error.message).toContain(VALID_FOLLOWUP_ID);
+    expect(mockExecuteFollowup).not.toHaveBeenCalled();
+  });
+
+  it("a valid job delegates to executeFollowup with exactly the followupId, nothing else from the payload", async () => {
+    mockExecuteFollowup.mockResolvedValueOnce({ outcome: "executed" });
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await processFollowupJob(fakeJob());
+
+    expect(mockExecuteFollowup).toHaveBeenCalledExactlyOnceWith(VALID_FOLLOWUP_ID);
+  });
+});
+
+describe("processFollowupJob — retry semantics use attemptsStarted, not attemptsMade", () => {
+  it("Case A: attemptsStarted=1 of 3 -> stays scheduled, no failed UPDATE, original error rethrown", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(
+      processFollowupJob(fakeJob({ attemptsStarted: 1, opts: { attempts: 3 } })),
+    ).rejects.toThrow("transient db error");
+
+    expect(mockMarkFailed).not.toHaveBeenCalled();
+  });
+
+  it("Case B: attemptsStarted=2 of 3 -> stays scheduled, no failed UPDATE, original error rethrown", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(
+      processFollowupJob(fakeJob({ attemptsStarted: 2, opts: { attempts: 3 } })),
+    ).rejects.toThrow("transient db error");
+
+    expect(mockMarkFailed).not.toHaveBeenCalled();
+  });
+
+  it("Case C: attemptsStarted=3 of 3 (final) -> best-effort status='failed' UPDATE, original error rethrown", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    mockMarkFailed.mockResolvedValueOnce(undefined);
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(
+      processFollowupJob(fakeJob({ attemptsStarted: 3, opts: { attempts: 3 } })),
+    ).rejects.toThrow("transient db error");
+
+    expect(mockMarkFailed).toHaveBeenCalledExactlyOnceWith(VALID_FOLLOWUP_ID);
+  });
+
+  it("regression: a misleading attemptsMade never drives the final-attempt decision (attemptsStarted does)", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    const { processFollowupJob } = await import("./followupWorker");
+
+    // attemptsStarted=2 (not final, of 3) but attemptsMade=3 (would look
+    // final if that field were used instead) — must NOT mark failed.
+    await expect(
+      processFollowupJob(fakeJob({ attemptsStarted: 2, attemptsMade: 3, opts: { attempts: 3 } })),
+    ).rejects.toThrow("transient db error");
+
+    expect(mockMarkFailed).not.toHaveBeenCalled();
+  });
+
+  it("if the failure-marking UPDATE itself also fails, the original processor error still propagates", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    mockMarkFailed.mockRejectedValueOnce(new Error("db unreachable for status correction"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(
+      processFollowupJob(fakeJob({ attemptsStarted: 3, opts: { attempts: 3 } })),
+    ).rejects.toThrow("transient db error");
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("no configured attempts option defaults the final-attempt threshold to 1", async () => {
+    mockExecuteFollowup.mockRejectedValueOnce(new Error("transient db error"));
+    mockMarkFailed.mockResolvedValueOnce(undefined);
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(processFollowupJob(fakeJob({ attemptsStarted: 1, opts: {} }))).rejects.toThrow("transient db error");
+
+    expect(mockMarkFailed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("processFollowupJob — controlled outcomes resolve normally (no false retry)", () => {
+  it("a cancelled outcome resolves normally — BullMQ must not retry a business-invalid followup", async () => {
+    mockExecuteFollowup.mockResolvedValueOnce({ outcome: "cancelled", reason: "conversation_not_active" });
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(processFollowupJob(fakeJob())).resolves.toBeUndefined();
+  });
+
+  it("a no-such-followup outcome resolves normally, not a retry", async () => {
+    mockExecuteFollowup.mockResolvedValueOnce({ outcome: "no_such_followup" });
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(processFollowupJob(fakeJob())).resolves.toBeUndefined();
+  });
+
+  it("an already_handled outcome resolves normally, not a retry", async () => {
+    mockExecuteFollowup.mockResolvedValueOnce({ outcome: "already_handled", status: "executed" });
+    const { processFollowupJob } = await import("./followupWorker");
+
+    await expect(processFollowupJob(fakeJob())).resolves.toBeUndefined();
   });
 });
 

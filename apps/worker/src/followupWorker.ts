@@ -1,37 +1,51 @@
 import { createClient } from "redis";
 import { createNodeRedisClient, Worker, type Job } from "bullmq";
 import { FOLLOWUP_JOB_NAME, FOLLOWUP_QUEUE_NAME, FollowupJobDataSchema, type FollowupJobData } from "@m3ak/shared";
+import { executeFollowup, markFollowupExecutionFailed, type ExecuteFollowupResult } from "./followupExecution";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 
-// TASK-026: infrastructure-only failure — deliberate, stable, and always
-// thrown for a valid, correctly-named, correctly-shaped job. A silent
-// success here would mark a BullMQ job "completed" even though no real
-// followup was ever executed. TASK-028 replaces the processor body (never
-// this validation) with real execution and removes this throw.
-export class FollowupExecutionNotImplementedError extends Error {
-  readonly followupId: string;
-
-  constructor(followupId: string) {
-    super(`followup_execution_not_implemented: followupId=${followupId} (TASK-028)`);
-    this.name = "FollowupExecutionNotImplementedError";
-    this.followupId = followupId;
-  }
-}
-
-// Exported separately from Worker construction so it is directly unit-
-// testable against a plain fake job object, without any real BullMQ/Redis
-// machinery. Never performs TASK-028's revérification/génération de
-// message/persistence/émission — only validates job name + payload shape,
-// then fails explicitly.
-export async function processFollowupJob(job: Job<FollowupJobData>): Promise<never> {
+// TASK-028: BullMQ/job boundary only — validates job name + payload shape,
+// then delegates all domain execution to followupExecution.ts. Never
+// performs revérification/génération/persistence itself.
+//
+// Retry-aware final-failure bookkeeping lives HERE, not in
+// followupExecution.ts or the Worker's `failed` event: only this processor
+// has the job's own attemptsStarted/opts.attempts context needed to tell a
+// retryable failure apart from a genuinely exhausted final attempt.
+// job.attemptsStarted (not attemptsMade) already reflects the CURRENT
+// attempt while the processor is running (it increments when the job moves
+// to active, before the processor body executes); attemptsMade only
+// increments after a failure is recorded, so it is always one behind and
+// would misidentify the second-to-last attempt as final.
+export async function processFollowupJob(job: Job<FollowupJobData>): Promise<void> {
   if (job.name !== FOLLOWUP_JOB_NAME) {
     throw new Error(`unexpected_job_name: expected "${FOLLOWUP_JOB_NAME}", received "${job.name}"`);
   }
 
   const data = FollowupJobDataSchema.parse(job.data);
 
-  throw new FollowupExecutionNotImplementedError(data.followupId);
+  let result: ExecuteFollowupResult;
+  try {
+    result = await executeFollowup(data.followupId);
+  } catch (error) {
+    const configuredAttempts = job.opts.attempts ?? 1;
+    const isFinalAttempt = job.attemptsStarted >= configuredAttempts;
+    if (isFinalAttempt) {
+      // Best-effort bookkeeping only — mirrors apps/api's followup.ts
+      // enqueue-failure pattern: never let a failure to mark the row failed
+      // mask or replace the original error; both remain diagnosable via logs.
+      await markFollowupExecutionFailed(data.followupId).catch((updateError: unknown) => {
+        console.error("[followupWorker] failed to mark followup as failed after final attempt error:", {
+          followupId: data.followupId,
+          updateError: updateError instanceof Error ? updateError.message : String(updateError),
+        });
+      });
+    }
+    throw error;
+  }
+
+  console.log("[followupWorker] followup execution outcome:", { followupId: data.followupId, outcome: result.outcome });
 }
 
 let rawClient: ReturnType<typeof createClient> | null = null;
