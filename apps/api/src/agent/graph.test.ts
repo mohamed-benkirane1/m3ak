@@ -1274,6 +1274,69 @@ describe("loadContext — TASK-025 customer memory integration", () => {
     expect(second.customerMemory).toEqual(updatedMemory);
   });
 
+  it("TASK-039: a returning customer reuses fresh persisted memory without being asked for the known city again", async () => {
+    const customerMessage = "Combien coûte la livraison pour moi ?";
+    mockedLoadConversationContext.mockResolvedValueOnce({
+      found: true,
+      conversation: { ...FOUND_CONVERSATION_FOR_MEMORY, id: "conversation-039", language: "french" },
+      messages: [],
+      cart: null,
+      escalationId: null,
+    });
+    mockedGetCustomerMemory.mockResolvedValueOnce({ found: true, memory: SAMPLE_MEMORY });
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "delivery_query", productQuery: null, family: null, color: null,
+      size: null, quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+      requestedPriceMad: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_DELIVERY", "RESPOND"] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true,
+      result: {
+        found: true,
+        zone: { city: "Casablanca", fee: 25, delayHours: 72, cashOnDelivery: true, storePickup: true },
+        feeCents: 2500,
+      },
+      resolvedRef: null,
+    });
+    mockedGenerateResponse.mockResolvedValueOnce({
+      content: "Pour Casablanca, la livraison coûte 25 MAD et prend 72 heures.",
+    });
+
+    const result = await invokeSalesGraph({
+      ...initialState,
+      threadId: "thread-039-returning-customer",
+      // This checkpoint-like input is deliberately stale: loadContext must
+      // replace it with the fresh PostgreSQL read before planning or tooling.
+      customerMemory: { ...SAMPLE_MEMORY, city: "Marrakech", totalKnownOrders: 99 },
+      messages: [{ role: "customer", content: customerMessage }],
+    });
+
+    expect(mockedGetCustomerMemory).toHaveBeenCalledExactlyOnceWith("customer-mem");
+    expect(mockedPlanNextActions).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      customerMemory: SAMPLE_MEMORY,
+      extraction: expect.objectContaining({ city: null }),
+    }));
+    expect(mockedExecuteAction).toHaveBeenCalledExactlyOnceWith(
+      "CHECK_DELIVERY",
+      expect.objectContaining({ customerMemory: SAMPLE_MEMORY, extraction: expect.objectContaining({ city: null }) }),
+    );
+    expect(mockedGenerateResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      customerMemory: SAMPLE_MEMORY,
+      delivery: { city: "Casablanca", feeCents: 2500, delayHours: 72, cashOnDelivery: true, storePickup: true },
+      humanInterventionNeeded: false,
+    }));
+    expect(result.customerMemory).toEqual(SAMPLE_MEMORY);
+    expect(result.extraction.city).toBeNull();
+    expect(result.messages.at(-1)).toEqual({
+      role: "assistant", content: "Pour Casablanca, la livraison coûte 25 MAD et prend 72 heures.",
+    });
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(mockedPersistConversation).toHaveBeenCalledExactlyOnceWith(
+      "conversation-039", "french", false, result.messages,
+    );
+  });
+
   it("10: TASK-024 interrupted resume does not replay an already-completed memory lookup", async () => {
     const threadId = "thread-resume-memory";
     mockedLoadConversationContext.mockResolvedValue({
