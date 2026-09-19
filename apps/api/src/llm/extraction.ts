@@ -66,6 +66,7 @@ Rules:
 - language: use "unknown" only if you truly cannot tell.
 - intent: use "unknown" if the request cannot be safely classified. Never null, never omitted.
 - productQuery/family/color/size/city/address: use null if not stated or not safe to infer. Never fabricate. Never an empty string.
+- Change of mind (e.g. "finalement...", "plutôt...", "non, je veux...", "je préfère...", "pas noir, plutôt beige", "X à la place de Y"): when the customer's message states both a rejected value and a newly desired one for the same slot, extract ONLY the newly desired value for that slot — never the rejected one, and never both, and never null when a new value was clearly given.
 - quantity: a positive integer only if the customer stated one; otherwise null. Never default to 1.
 - paymentMethod: classify only if the customer's wording clearly matches one of the three values; otherwise null.
 - confirmation: true only if the customer explicitly confirms/agrees to proceed; false only if they explicitly refuse/decline/cancel; null if absent or ambiguous.

@@ -89,7 +89,10 @@ function hasValidResultShape(action: RecognizedObservationAction, result: unknow
     case "CREATE_ORDER":
       return typeof record.created === "boolean";
     case "ADD_TO_CART":
+    case "UPDATE_CART_ITEM":
       return typeof record.ok === "boolean";
+    case "REMOVE_CART_ITEM":
+      return typeof record.removed === "boolean";
     default:
       return false;
   }
@@ -210,6 +213,8 @@ function evaluatePerAction(
       return evaluateCheckDelivery(result);
     case "CREATE_CART":
     case "ADD_TO_CART":
+    case "UPDATE_CART_ITEM":
+    case "REMOVE_CART_ITEM":
     case "CREATE_ORDER":
       return evaluateSimpleDeterministic();
   }

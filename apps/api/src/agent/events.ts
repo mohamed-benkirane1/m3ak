@@ -20,6 +20,8 @@ export const PublicToolNameSchema = z.enum([
   "getDeliveryOptions",
   "createCart",
   "addCartItem",
+  "updateCartItem",
+  "removeCartItem",
   "createOrder",
 ]);
 
@@ -99,6 +101,8 @@ export const PUBLIC_TOOL_BY_ACTION = {
   CHECK_DELIVERY: "getDeliveryOptions",
   CREATE_CART: "createCart",
   ADD_TO_CART: "addCartItem",
+  UPDATE_CART_ITEM: "updateCartItem",
+  REMOVE_CART_ITEM: "removeCartItem",
   CREATE_ORDER: "createOrder",
 } as const satisfies Record<string, PublicToolName>;
 

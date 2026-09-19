@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../catalogue/products", () => ({
   searchProducts: vi.fn(),
   getAvailability: vi.fn(),
+  getProduct: vi.fn(),
 }));
 vi.mock("../catalogue/alternatives", () => ({
   findAlternatives: vi.fn(),
@@ -16,6 +17,8 @@ vi.mock("../delivery/delivery", () => ({
 vi.mock("../cart/cart", () => ({
   createCart: vi.fn(),
   addCartItem: vi.fn(),
+  updateCartItem: vi.fn(),
+  removeCartItem: vi.fn(),
 }));
 vi.mock("../order/order", () => ({
   createOrder: vi.fn(),
@@ -23,8 +26,8 @@ vi.mock("../order/order", () => ({
 
 import { findAlternatives } from "../catalogue/alternatives";
 import { getApplicablePromotion } from "../catalogue/promotions";
-import { getAvailability, searchProducts } from "../catalogue/products";
-import { addCartItem, createCart } from "../cart/cart";
+import { getAvailability, getProduct, searchProducts } from "../catalogue/products";
+import { addCartItem, createCart, removeCartItem, updateCartItem } from "../cart/cart";
 import { getDeliveryOptions } from "../delivery/delivery";
 import { createOrder } from "../order/order";
 import { executeAction } from "./actionExecutor";
@@ -32,11 +35,14 @@ import type { M3AKState } from "./state";
 
 const mockedSearchProducts = vi.mocked(searchProducts);
 const mockedGetAvailability = vi.mocked(getAvailability);
+const mockedGetProduct = vi.mocked(getProduct);
 const mockedFindAlternatives = vi.mocked(findAlternatives);
 const mockedGetApplicablePromotion = vi.mocked(getApplicablePromotion);
 const mockedGetDeliveryOptions = vi.mocked(getDeliveryOptions);
 const mockedCreateCart = vi.mocked(createCart);
 const mockedAddCartItem = vi.mocked(addCartItem);
+const mockedUpdateCartItem = vi.mocked(updateCartItem);
+const mockedRemoveCartItem = vi.mocked(removeCartItem);
 const mockedCreateOrder = vi.mocked(createOrder);
 
 const product = {
@@ -88,6 +94,21 @@ const stateWithCart: M3AKState = {
   cart: { id: "cart-1", version: 0, items: [] },
 };
 
+// TASK-035 (AC-03): carriedRef is REF-001 (from stateWithRef's lastResult) —
+// this cart already holds that SAME ref, matching a pure quantity change.
+const stateWithMatchingCartItem: M3AKState = {
+  ...stateWithRef,
+  cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-001", quantity: 1, unitPrice: 199.95 }] },
+};
+
+// TASK-035 (AC-03): carriedRef is REF-001 (freshly resolved), but the cart
+// still holds a DIFFERENT, now-stale ref — matching a size/color/product
+// change-of-mind where the old variant must be dropped.
+const stateWithStaleCartItem: M3AKState = {
+  ...stateWithRef,
+  cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-OLD-SIZE-L", quantity: 1, unitPrice: 189.95 }] },
+};
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 afterEach(() => {
@@ -126,6 +147,79 @@ describe("executeAction — SEARCH_PRODUCTS", () => {
     const outcome = await executeAction("SEARCH_PRODUCTS", stateNoCriteria);
     expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });
     expect(mockedSearchProducts).not.toHaveBeenCalled();
+  });
+
+  describe("cart-derived fallback (TASK-035, AC-03 'sans recommencer la conversation depuis zéro')", () => {
+    const cartProduct = { ...product, ref: "REF-OLD-SIZE-S", family: "Caftan", color: "bordeaux", size: "S" };
+
+    it("fills a missing family/color from the single real cart item when the customer only restates size", async () => {
+      const stateChangeOfMind: M3AKState = {
+        ...baseState,
+        extraction: { ...baseState.extraction, family: null, color: null, size: "M" },
+        cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-OLD-SIZE-S", quantity: 1, unitPrice: 250 }] },
+      };
+      mockedGetProduct.mockResolvedValueOnce({ found: true, product: cartProduct });
+      mockedSearchProducts.mockResolvedValueOnce([{ ...cartProduct, ref: "REF-NEW-SIZE-M", size: "M" }]);
+
+      const outcome = await executeAction("SEARCH_PRODUCTS", stateChangeOfMind);
+
+      expect(mockedGetProduct).toHaveBeenCalledWith("REF-OLD-SIZE-S");
+      expect(mockedSearchProducts).toHaveBeenCalledWith({ family: "Caftan", color: "bordeaux", size: "M" });
+      expect(outcome.ok).toBe(true);
+      expect(outcome.resolvedRef).toBe("REF-NEW-SIZE-M");
+      // The real family/color, now known, become durable state — not just a
+      // one-off query argument — so later steps this same turn see them too.
+      expect(outcome.extractionPatch).toEqual({ family: "Caftan", color: "bordeaux" });
+    });
+
+    it("never overrides a family/color the customer explicitly stated this turn", async () => {
+      const state: M3AKState = {
+        ...baseState,
+        extraction: { ...baseState.extraction, family: "Robe", color: "ivoire", size: "M" },
+        cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-OLD-SIZE-S", quantity: 1, unitPrice: 250 }] },
+      };
+      mockedSearchProducts.mockResolvedValueOnce([product]);
+
+      await executeAction("SEARCH_PRODUCTS", state);
+
+      expect(mockedGetProduct).not.toHaveBeenCalled();
+      expect(mockedSearchProducts).toHaveBeenCalledWith({ family: "Robe", color: "ivoire", size: "M" });
+    });
+
+    it("never guesses when the cart holds more than one item", async () => {
+      const state: M3AKState = {
+        ...baseState,
+        extraction: { ...baseState.extraction, family: null, color: null, size: "M" },
+        cart: {
+          id: "cart-1", version: 1,
+          items: [
+            { productRef: "REF-A", quantity: 1, unitPrice: 100 },
+            { productRef: "REF-B", quantity: 1, unitPrice: 200 },
+          ],
+        },
+      };
+      mockedSearchProducts.mockResolvedValueOnce([]);
+
+      await executeAction("SEARCH_PRODUCTS", state);
+
+      expect(mockedGetProduct).not.toHaveBeenCalled();
+      expect(mockedSearchProducts).toHaveBeenCalledWith({ size: "M" });
+    });
+
+    it("never fabricates family/color when the cart item itself cannot be found — searches on whatever was already stated", async () => {
+      const stateChangeOfMind: M3AKState = {
+        ...baseState,
+        extraction: { ...baseState.extraction, family: null, color: null, size: "M" },
+        cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-GONE", quantity: 1, unitPrice: 250 }] },
+      };
+      mockedGetProduct.mockResolvedValueOnce({ found: false });
+      mockedSearchProducts.mockResolvedValueOnce([]);
+
+      const outcome = await executeAction("SEARCH_PRODUCTS", stateChangeOfMind);
+
+      expect(mockedSearchProducts).toHaveBeenCalledWith({ size: "M" });
+      expect(outcome.extractionPatch).toBeUndefined();
+    });
   });
 });
 
@@ -361,6 +455,132 @@ describe("executeAction — ADD_TO_CART", () => {
     const stateNoQuantity: M3AKState = { ...stateWithCart, extraction: { ...stateWithCart.extraction, quantity: null } };
     const outcome = await executeAction("ADD_TO_CART", stateNoQuantity);
     expect(mockedAddCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — UPDATE_CART_ITEM (TASK-035)", () => {
+  it("success promotes the updated cart snapshot, replacing (not accumulating) the quantity", async () => {
+    mockedUpdateCartItem.mockResolvedValueOnce({
+      ok: true,
+      cart: {
+        id: "cart-1", conversationId: "conversation-020", status: "active", version: 2,
+        items: [{ productRef: "REF-001", quantity: 3, unitPrice: 199.95 }],
+      },
+    });
+    const state: M3AKState = { ...stateWithMatchingCartItem, extraction: { ...stateWithMatchingCartItem.extraction, quantity: 3 } };
+
+    const outcome = await executeAction("UPDATE_CART_ITEM", state);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.cartPatch).toEqual({ id: "cart-1", version: 2, items: [{ productRef: "REF-001", quantity: 3, unitPrice: 199.95 }] });
+    expect(mockedUpdateCartItem).toHaveBeenCalledWith("cart-1", "REF-001", 3);
+  });
+
+  it("insufficient stock -> ok:false, no cartPatch", async () => {
+    mockedUpdateCartItem.mockResolvedValueOnce({ ok: false, reason: "insufficient_stock", requestedQuantity: 9, availableStock: 2 });
+    const state: M3AKState = { ...stateWithMatchingCartItem, extraction: { ...stateWithMatchingCartItem.extraction, quantity: 9 } };
+
+    const outcome = await executeAction("UPDATE_CART_ITEM", state);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.cartPatch).toBeUndefined();
+  });
+
+  it("no cart yet -> no tool call", async () => {
+    const outcome = await executeAction("UPDATE_CART_ITEM", stateWithRef);
+    expect(mockedUpdateCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("missing quantity -> no tool call", async () => {
+    const stateNoQuantity: M3AKState = { ...stateWithMatchingCartItem, extraction: { ...stateWithMatchingCartItem.extraction, quantity: null } };
+    const outcome = await executeAction("UPDATE_CART_ITEM", stateNoQuantity);
+    expect(mockedUpdateCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("no carriedRef -> no tool call", async () => {
+    const stateNoRef: M3AKState = { ...baseState, cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-001", quantity: 1, unitPrice: 199.95 }] } };
+    const outcome = await executeAction("UPDATE_CART_ITEM", stateNoRef);
+    expect(mockedUpdateCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("executeAction — REMOVE_CART_ITEM (TASK-035)", () => {
+  it("removes exactly the stale item (a different ref than the freshly resolved one) and promotes the updated cart", async () => {
+    mockedRemoveCartItem.mockResolvedValueOnce({
+      removed: true,
+      cart: { id: "cart-1", conversationId: "conversation-020", status: "active", version: 2, items: [] },
+    });
+
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateWithStaleCartItem);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.cartPatch).toEqual({ id: "cart-1", version: 2, items: [] });
+    // The OLD ref is what gets removed — never the freshly resolved carriedRef.
+    expect(mockedRemoveCartItem).toHaveBeenCalledWith("cart-1", "REF-OLD-SIZE-L");
+    expect(mockedRemoveCartItem).not.toHaveBeenCalledWith("cart-1", "REF-001");
+    // extraction.quantity was already known (baseState: 2) — never overridden.
+    expect(outcome.extractionPatch).toBeUndefined();
+  });
+
+  it("TASK-035: carries the removed item's real quantity forward when the customer never restated one", async () => {
+    const stateNoQuantity: M3AKState = {
+      ...stateWithStaleCartItem,
+      extraction: { ...stateWithStaleCartItem.extraction, quantity: null },
+      cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-OLD-SIZE-L", quantity: 3, unitPrice: 189.95 }] },
+    };
+    mockedRemoveCartItem.mockResolvedValueOnce({
+      removed: true,
+      cart: { id: "cart-1", conversationId: "conversation-020", status: "active", version: 2, items: [] },
+    });
+
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateNoQuantity);
+
+    expect(outcome.extractionPatch).toEqual({ quantity: 3 });
+  });
+
+  it("item not in cart -> ok:false, no cartPatch", async () => {
+    mockedRemoveCartItem.mockResolvedValueOnce({ removed: false, reason: "item_not_in_cart" });
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateWithStaleCartItem);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.cartPatch).toBeUndefined();
+  });
+
+  it("no cart yet -> no tool call", async () => {
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateWithRef);
+    expect(mockedRemoveCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("no carriedRef -> no tool call", async () => {
+    const stateNoRef: M3AKState = { ...baseState, cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-OLD-SIZE-L", quantity: 1, unitPrice: 189.95 }] } };
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateNoRef);
+    expect(mockedRemoveCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("nothing stale (cart already matches carriedRef) -> no tool call, never guesses", async () => {
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateWithMatchingCartItem);
+    expect(mockedRemoveCartItem).not.toHaveBeenCalled();
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("ambiguous (more than one stale item) -> no tool call, never guesses which one", async () => {
+    const stateAmbiguous: M3AKState = {
+      ...stateWithRef,
+      cart: {
+        id: "cart-1", version: 1,
+        items: [
+          { productRef: "REF-OLD-A", quantity: 1, unitPrice: 189.95 },
+          { productRef: "REF-OLD-B", quantity: 1, unitPrice: 179.95 },
+        ],
+      },
+    };
+    const outcome = await executeAction("REMOVE_CART_ITEM", stateAmbiguous);
+    expect(mockedRemoveCartItem).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
   });
 });

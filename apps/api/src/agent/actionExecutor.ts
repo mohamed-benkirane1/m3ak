@@ -1,8 +1,8 @@
 import type { Cart } from "@m3ak/shared";
 import { findAlternatives } from "../catalogue/alternatives";
 import { getApplicablePromotion } from "../catalogue/promotions";
-import { getAvailability, searchProducts } from "../catalogue/products";
-import { addCartItem, createCart } from "../cart/cart";
+import { getAvailability, getProduct, searchProducts } from "../catalogue/products";
+import { addCartItem, createCart, removeCartItem, updateCartItem } from "../cart/cart";
 import { getDeliveryOptions } from "../delivery/delivery";
 import { createOrder } from "../order/order";
 import type { AllowedAction } from "./orchestrator";
@@ -20,6 +20,12 @@ export interface ActionOutcome {
   // set from a real deterministic tool's own return value.
   cartPatch?: CartSnapshot;
   orderId?: string;
+  // TASK-035 (AC-03 "sans recommencer la conversation depuis zéro"): fills a
+  // slot the customer left unstated this turn from a real, already-known,
+  // unambiguous source (the single existing cart item) — never invented, and
+  // never overwrites a slot extraction already supplied. Merged into
+  // state.extraction the same way conversation()'s own merge already works.
+  extractionPatch?: Partial<M3AKState["extraction"]>;
 }
 
 function missingInput(resolvedRef: string | null): ActionOutcome {
@@ -75,6 +81,29 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
       if (state.extraction.family) criteria.family = state.extraction.family;
       if (state.extraction.color) criteria.color = state.extraction.color;
       if (state.extraction.size) criteria.size = state.extraction.size;
+
+      // TASK-035 (AC-03): a change-of-mind follow-up ("finalement taille M")
+      // may not restate a family/color the customer already established.
+      // When the cart already holds exactly one real item, its own real
+      // attributes (read fresh via getProduct, never invented) fill the gap
+      // — never applied when the cart is empty or already ambiguous (more
+      // than one item), matching REMOVE_CART_ITEM's own "never guess" rule.
+      const extractionPatch: Partial<M3AKState["extraction"]> = {};
+      if ((!criteria.family || !criteria.color) && state.cart?.items.length === 1) {
+        const cartItem = state.cart.items[0] as CartSnapshot["items"][number];
+        const cartProductResult = await getProduct(cartItem.productRef);
+        if (cartProductResult.found) {
+          if (!criteria.family) {
+            criteria.family = cartProductResult.product.family;
+            extractionPatch.family = cartProductResult.product.family;
+          }
+          if (!criteria.color && cartProductResult.product.color) {
+            criteria.color = cartProductResult.product.color;
+            extractionPatch.color = cartProductResult.product.color;
+          }
+        }
+      }
+
       if (Object.keys(criteria).length === 0) {
         return missingInput(carriedRef);
       }
@@ -83,7 +112,9 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
       // A fresh search deliberately resets focus: ambiguous (0 or >1) results
       // never fall back to whatever was resolved before this search.
       const resolvedRef = products.length === 1 && onlyProduct ? onlyProduct.ref : null;
-      return { ok: products.length > 0, result: products, resolvedRef };
+      const outcome: ActionOutcome = { ok: products.length > 0, result: products, resolvedRef };
+      if (Object.keys(extractionPatch).length > 0) outcome.extractionPatch = extractionPatch;
+      return outcome;
     }
 
     case "CHECK_STOCK": {
@@ -130,6 +161,44 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
       const result = await addCartItem(state.cart.id, carriedRef, state.extraction.quantity, todayIsoDate());
       if (result.ok) {
         return { ok: true, result, resolvedRef: carriedRef, cartPatch: toCartSnapshot(result.cart) };
+      }
+      return { ok: false, result, resolvedRef: carriedRef };
+    }
+
+    // TASK-035 (AC-03): a pure quantity change on a product ref already in the
+    // cart. Deliberately updateCartItem (replace), never addCartItem
+    // (accumulate) — the customer said "3 instead of 2", not "3 more".
+    case "UPDATE_CART_ITEM": {
+      if (!state.cart || !carriedRef || !state.extraction.quantity) return missingInput(carriedRef);
+      const result = await updateCartItem(state.cart.id, carriedRef, state.extraction.quantity);
+      if (result.ok) {
+        return { ok: true, result, resolvedRef: carriedRef, cartPatch: toCartSnapshot(result.cart) };
+      }
+      return { ok: false, result, resolvedRef: carriedRef };
+    }
+
+    // TASK-035 (AC-03): a size/color/product change means a different
+    // catalogue ref (cart_items is keyed by (cart_id, product_ref)), so the
+    // old variant must be dropped before the newly resolved one is added.
+    // Only ever removes when exactly one cart item is stale relative to the
+    // freshly resolved carriedRef — which item the customer means is never
+    // guessed when the cart holds more than one, or when nothing in it
+    // actually differs from what was just resolved.
+    case "REMOVE_CART_ITEM": {
+      if (!state.cart || !carriedRef) return missingInput(carriedRef);
+      const staleItems = state.cart.items.filter((item) => item.productRef !== carriedRef);
+      if (staleItems.length !== 1) return missingInput(carriedRef);
+      const staleItem = staleItems[0] as CartSnapshot["items"][number];
+      const result = await removeCartItem(state.cart.id, staleItem.productRef);
+      if (result.removed) {
+        const outcome: ActionOutcome = { ok: true, result, resolvedRef: carriedRef, cartPatch: toCartSnapshot(result.cart) };
+        // TASK-035 (AC-03): "finalement taille M" never restates a quantity
+        // the customer already gave — the item being replaced is the only
+        // real source for it, captured here before it is gone from the cart.
+        if (state.extraction.quantity === null) {
+          outcome.extractionPatch = { quantity: staleItem.quantity };
+        }
+        return outcome;
       }
       return { ok: false, result, resolvedRef: carriedRef };
     }

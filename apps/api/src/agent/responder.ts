@@ -180,6 +180,25 @@ function sanitizeAddToCart(result: unknown): unknown {
   };
 }
 
+// TASK-035: identical allowlist shape to sanitizeAddToCart — a quantity
+// change never exposes anything beyond ok/reason/requestedQuantity/
+// availableStock.
+function sanitizeUpdateCartItem(result: unknown): unknown {
+  if (!isRecord(result) || typeof result.ok !== "boolean") return null;
+  if (result.ok) return { ok: true, reason: null, requestedQuantity: null, availableStock: null };
+  return {
+    ok: false,
+    reason: typeof result.reason === "string" ? result.reason : null,
+    requestedQuantity: typeof result.requestedQuantity === "number" ? result.requestedQuantity : null,
+    availableStock: typeof result.availableStock === "number" ? result.availableStock : null,
+  };
+}
+
+function sanitizeRemoveCartItem(result: unknown): unknown {
+  if (!isRecord(result) || typeof result.removed !== "boolean") return null;
+  return { removed: result.removed, reason: typeof result.reason === "string" ? result.reason : null };
+}
+
 function sanitizeCreateOrder(result: unknown): unknown {
   if (!isRecord(result) || typeof result.created !== "boolean") return null;
   if (!result.created) return { created: false, reason: typeof result.reason === "string" ? result.reason : null };
@@ -195,6 +214,8 @@ const ACTION_PROJECTORS: Record<string, (result: unknown) => unknown> = {
   CHECK_DELIVERY: sanitizeCheckDelivery,
   CREATE_CART: sanitizeCreateCart,
   ADD_TO_CART: sanitizeAddToCart,
+  UPDATE_CART_ITEM: sanitizeUpdateCartItem,
+  REMOVE_CART_ITEM: sanitizeRemoveCartItem,
   CREATE_ORDER: sanitizeCreateOrder,
 };
 

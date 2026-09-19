@@ -172,6 +172,8 @@ const EXECUTABLE_ACTIONS = new Set<string>([
   "CHECK_DELIVERY",
   "CREATE_CART",
   "ADD_TO_CART",
+  "UPDATE_CART_ITEM",
+  "REMOVE_CART_ITEM",
   "CREATE_ORDER",
 ]);
 
@@ -293,6 +295,13 @@ async function tool(state: M3AKState, activitySink: AgentActivitySink) {
   }
   if (outcome.orderId) {
     patch.orderId = outcome.orderId;
+  }
+  // TASK-035 (AC-03): merges in exactly the same "supplied wins, unstated
+  // falls back" shape conversation()'s own extraction merge already uses —
+  // never overwrites a slot the customer stated this turn (executeAction
+  // itself only ever proposes a patch for a slot it found still null).
+  if (outcome.extractionPatch) {
+    patch.extraction = { ...state.extraction, ...outcome.extractionPatch };
   }
   // TASK-034: captured once, right when FIND_ALTERNATIVES actually succeeds —
   // never re-derived later from `lastResult`, which a subsequent same-turn

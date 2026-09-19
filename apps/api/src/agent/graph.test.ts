@@ -1467,6 +1467,120 @@ describe("conversation — TASK-P1 real extraction integration", () => {
   });
 });
 
+describe("TASK-035 — customer change of mind (AC-03)", () => {
+  // Turn 1 already happened: the customer's earlier criteria were merged into
+  // extraction and a real cart item (Caftan noir, L) was committed.
+  const turn1Extraction = {
+    productQuery: "caftan", family: "Caftan", color: "noir", size: "L",
+    quantity: 1, city: null, address: null, paymentMethod: null, confirmation: null,
+  };
+  const turn1Cart = { id: "cart-035", version: 1, items: [{ productRef: "REF-0066", quantity: 1, unitPrice: 450 }] };
+  const stateAfterTurn1: M3AKState = {
+    ...initialState,
+    language: "french",
+    intent: "product_search",
+    extraction: turn1Extraction,
+    cart: turn1Cart,
+    messages: [{ role: "customer", content: "Finalement je préfère la taille M." }],
+  };
+
+  it("an explicit size change updates extraction and reaches the planner's real cart snapshot, without losing unrelated criteria", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "product_search", productQuery: null, family: null, color: null,
+      size: "M", quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    await invokeSalesGraph(stateAfterTurn1);
+
+    const plannerInput = mockedPlanNextActions.mock.calls[0]?.[0] as M3AKState;
+    // The explicitly changed criterion replaces the stale one...
+    expect(plannerInput.extraction.size).toBe("M");
+    // ...while criteria the customer did not restate remain available.
+    expect(plannerInput.extraction).toEqual(expect.objectContaining({ family: "Caftan", color: "noir", quantity: 1 }));
+    // The planner sees the REAL current cart (needed to target UPDATE_CART_ITEM/REMOVE_CART_ITEM).
+    expect(plannerInput.cart).toEqual(turn1Cart);
+  });
+
+  it("resolves the new size, drops the stale cart item, and adds the newly resolved one — the old ref never reaches search/stock/order tooling again", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "product_search", productQuery: null, family: null, color: null,
+      size: "M", quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({
+      plan: ["SEARCH_PRODUCTS", "REMOVE_CART_ITEM", "ADD_TO_CART", "RESPOND"],
+    });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-0065" }], resolvedRef: "REF-0065" })
+      .mockResolvedValueOnce({
+        ok: true, result: { removed: true }, resolvedRef: "REF-0065",
+        cartPatch: { id: "cart-035", version: 2, items: [] },
+      })
+      .mockResolvedValueOnce({
+        ok: true, result: { ok: true }, resolvedRef: "REF-0065",
+        cartPatch: { id: "cart-035", version: 3, items: [{ productRef: "REF-0065", quantity: 1, unitPrice: 450 }] },
+      });
+    mockedGenerateResponse.mockResolvedValueOnce({ content: "C'est noté, taille M." });
+
+    const result = await invokeSalesGraph(stateAfterTurn1);
+
+    expect(mockedExecuteAction).toHaveBeenCalledTimes(3);
+    expect(mockedExecuteAction).toHaveBeenNthCalledWith(1, "SEARCH_PRODUCTS", expect.objectContaining({
+      extraction: expect.objectContaining({ size: "M" }),
+    }));
+    expect(mockedExecuteAction).toHaveBeenNthCalledWith(2, "REMOVE_CART_ITEM", expect.anything());
+    expect(mockedExecuteAction).toHaveBeenNthCalledWith(3, "ADD_TO_CART", expect.anything());
+    // The cart ends the turn holding only the newly resolved item — the old
+    // size-L ref is gone, never silently kept alongside the new one.
+    expect(result.cart).toEqual({ id: "cart-035", version: 3, items: [{ productRef: "REF-0065", quantity: 1, unitPrice: 450 }] });
+    expect(result.messages.at(-1)).toEqual({ role: "assistant", content: "C'est noté, taille M." });
+  });
+
+  it("a message that only restates the same criteria never triggers an unnecessary cart mutation (existing single-turn behavior stays valid)", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "product_search", productQuery: "caftan", family: "Caftan", color: "noir",
+      size: "L", quantity: 1, city: null, address: null, paymentMethod: null, confirmation: null,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(stateAfterTurn1);
+
+    expect(mockedExecuteAction).not.toHaveBeenCalled();
+    expect(result.cart).toEqual(turn1Cart);
+  });
+
+  it("real production shape: when extraction genuinely resets to null between turns (createFreshState), a tool's extractionPatch (cart-derived family/color) still reaches the very next planner call", async () => {
+    // Mirrors chat.ts's createFreshState() exactly: extraction starts fully
+    // null every turn — only messages/cart/language survive via loadContext.
+    const trueFreshTurnState: M3AKState = {
+      ...initialState,
+      cart: turn1Cart,
+      messages: [{ role: "customer", content: "Finalement je préfère la taille M." }],
+    };
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "product_search", productQuery: null, family: null, color: null,
+      size: "M", quantity: null, city: null, address: null, paymentMethod: null, confirmation: null,
+    });
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS"] })
+      .mockResolvedValueOnce({ plan: [] });
+    // The real actionExecutor would derive this from the cart's own item via
+    // getProduct — here it is directly mocked, as the graph-level contract
+    // under test is only "does the tool node apply extractionPatch".
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: true, result: [{ ref: "REF-0065" }], resolvedRef: "REF-0065",
+      extractionPatch: { family: "Caftan", color: "noir" },
+    });
+
+    await invokeSalesGraph(trueFreshTurnState);
+
+    const secondPlannerInput = mockedPlanNextActions.mock.calls[1]?.[0] as M3AKState;
+    expect(secondPlannerInput.extraction).toEqual(
+      expect.objectContaining({ family: "Caftan", color: "noir", size: "M" }),
+    );
+  });
+});
+
 describe("persist — TASK-023 integration", () => {
   it("1: the normal terminal path calls persistConversation", async () => {
     mockedPlanNextActions.mockResolvedValueOnce({ plan: ["RESPOND"] });

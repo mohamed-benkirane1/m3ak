@@ -198,7 +198,7 @@ describe("planNextActions — no retry (13)", () => {
 });
 
 describe("planNextActions — planner payload contract (14)", () => {
-  it("14: user payload contains EXACTLY language, intent, extraction, executedSteps, lastOutcomeOk, remainingPlan, customerMemory", async () => {
+  it("14: user payload contains EXACTLY language, intent, extraction, executedSteps, lastOutcomeOk, remainingPlan, customerMemory, cart", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
@@ -208,7 +208,7 @@ describe("planNextActions — planner payload contract (14)", () => {
     expect(userMessage?.role).toBe("user");
     const payload = JSON.parse(userMessage?.content ?? "{}") as Record<string, unknown>;
     expect(Object.keys(payload).sort()).toEqual([
-      "customerMemory", "executedSteps", "extraction", "intent", "language", "lastOutcomeOk", "remainingPlan",
+      "cart", "customerMemory", "executedSteps", "extraction", "intent", "language", "lastOutcomeOk", "remainingPlan",
     ]);
     expect(payload.language).toBe(baseState.language);
     expect(payload.intent).toBe(baseState.intent);
@@ -216,6 +216,9 @@ describe("planNextActions — planner payload contract (14)", () => {
     expect(payload.executedSteps).toEqual(baseState.executedSteps);
     expect(payload.remainingPlan).toEqual(baseState.activePlan);
     expect(payload.customerMemory).toEqual(baseState.customerMemory);
+    // TASK-035 (AC-03): the planner cannot decide to UPDATE_CART_ITEM/
+    // REMOVE_CART_ITEM an existing product ref without seeing the real cart.
+    expect(payload.cart).toEqual(baseState.cart);
   });
 
   it("customerMemory-a: null works normally — the payload key is still present, as null", async () => {
@@ -259,7 +262,7 @@ describe("planNextActions — planner payload contract (14)", () => {
     expect(systemMessage?.content).toMatch(/never replaces the customer's explicit confirmation/i);
   });
 
-  it("14b: no business/internal fields (messages, cart, lastResult, IDs) leak into the payload", async () => {
+  it("14b: no business/internal fields (messages, lastResult, IDs) leak into the payload", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
@@ -268,8 +271,21 @@ describe("planNextActions — planner payload contract (14)", () => {
     const userContent = messages?.[1]?.content ?? "";
     expect(userContent).not.toContain("lastResult");
     expect(userContent).not.toContain("threadId");
-    expect(userContent).not.toContain("cart");
     expect(userContent).not.toContain("orderId");
+  });
+
+  it("14g: cart is included verbatim (id/items/productRef/quantity/unitPrice) — TASK-035 needs it to target UPDATE_CART_ITEM/REMOVE_CART_ITEM at a real ref", async () => {
+    resolvePlan(["RESPOND"]);
+    const cart = {
+      id: "11111111-1111-1111-1111-111111111111",
+      version: 2,
+      items: [{ productRef: "REF-0066", quantity: 1, unitPrice: 450 }],
+    };
+
+    await planNextActions({ ...baseState, cart });
+
+    const payload = JSON.parse(mockedReasoningChat.mock.calls[0]?.[0]?.[1]?.content ?? "{}") as Record<string, unknown>;
+    expect(payload.cart).toEqual(cart);
   });
 
   it("14c: lastOutcomeOk is null when lastResult carries no boolean ok", async () => {
@@ -318,14 +334,16 @@ describe("planNextActions — planner payload contract (14)", () => {
 });
 
 describe("planNextActions — system prompt contract (15-17)", () => {
-  it("15: system prompt lists all 10 exact allowed action values, including CREATE_CART", async () => {
+  it("15: system prompt lists all 12 exact allowed action values, including CREATE_CART, UPDATE_CART_ITEM, REMOVE_CART_ITEM", async () => {
     resolvePlan(["RESPOND"]);
 
     await planNextActions(baseState);
 
     const systemContent = mockedReasoningChat.mock.calls[0]?.[0]?.[0]?.content ?? "";
-    expect(AllowedActionSchema.options).toHaveLength(10);
+    expect(AllowedActionSchema.options).toHaveLength(12);
     expect(AllowedActionSchema.options).toContain("CREATE_CART");
+    expect(AllowedActionSchema.options).toContain("UPDATE_CART_ITEM");
+    expect(AllowedActionSchema.options).toContain("REMOVE_CART_ITEM");
     for (const action of AllowedActionSchema.options) {
       expect(systemContent).toContain(action);
     }

@@ -306,6 +306,34 @@ describe("evaluateCommercialGuardrails — CREATE_CART / ADD_TO_CART / CREATE_OR
     expect(decision.authorized).toBe(true);
   });
 
+  it("TASK-035: UPDATE_CART_ITEM success is authorized", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({ lastResult: { action: "UPDATE_CART_ITEM", ok: true, result: { ok: true, cart: { id: "cart-1" } }, resolvedRef: "REF-001" } }),
+    );
+    expect(decision.authorized).toBe(true);
+  });
+
+  it("TASK-035: UPDATE_CART_ITEM typed negative (insufficient stock) is authorized — honest, not invented", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({ lastResult: { action: "UPDATE_CART_ITEM", ok: false, result: { ok: false, reason: "insufficient_stock", requestedQuantity: 9, availableStock: 2 }, resolvedRef: "REF-001" } }),
+    );
+    expect(decision.authorized).toBe(true);
+  });
+
+  it("TASK-035: REMOVE_CART_ITEM success is authorized", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({ lastResult: { action: "REMOVE_CART_ITEM", ok: true, result: { removed: true, cart: { id: "cart-1" } }, resolvedRef: "REF-001" } }),
+    );
+    expect(decision.authorized).toBe(true);
+  });
+
+  it("TASK-035: REMOVE_CART_ITEM typed negative (item not in cart) is authorized — honest, not invented", () => {
+    const decision = evaluateCommercialGuardrails(
+      withState({ lastResult: { action: "REMOVE_CART_ITEM", ok: false, result: { removed: false, reason: "item_not_in_cart" }, resolvedRef: "REF-001" } }),
+    );
+    expect(decision.authorized).toBe(true);
+  });
+
   it("26: CREATE_ORDER success is authorized, orderId untouched here", () => {
     const decision = evaluateCommercialGuardrails(
       withState({ lastResult: { action: "CREATE_ORDER", ok: true, result: { created: true, order: { id: "order-1" } }, resolvedRef: null } }),
