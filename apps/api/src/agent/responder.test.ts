@@ -31,6 +31,7 @@ const baseState: M3AKState = {
   cart: null,
   promotion: null,
   delivery: null,
+  alternatives: [],
   cartTotalCents: null,
   nextAction: null,
   activePlan: [],
@@ -145,7 +146,7 @@ describe("generateResponse — privacy boundary (C, D)", () => {
     expect(Object.keys(payload).sort()).toEqual(
       [
         "language", "mode", "customerMessage", "lastAction", "observation",
-        "cart", "promotion", "delivery", "orderConfirmed", "escalationCreated", "customerMemory",
+        "cart", "promotion", "delivery", "alternatives", "orderConfirmed", "escalationCreated", "customerMemory",
       ].sort(),
     );
   });
@@ -202,6 +203,45 @@ describe("generateResponse — honest stock grounding (E, F)", () => {
     await generateResponse(state);
 
     expect(capturedUserPayload().observation).toEqual({ found: true, alternatives: [] });
+  });
+});
+
+describe("generateResponse — durable alternatives snapshot (TASK-034)", () => {
+  it("grounds on state.alternatives even when lastResult is a later, unrelated action (real out-of-stock + real alternative scenario)", async () => {
+    mockedFastChat.mockResolvedValueOnce("réponse");
+    const state: M3AKState = {
+      ...baseState,
+      // The requested REF-0066 (Caftan noir, L) is still zero stock — this is
+      // the MOST RECENT tool result, exactly as a redundant same-turn
+      // CHECK_STOCK re-check would leave it (TASK-034's real reproduction).
+      lastResult: {
+        action: "CHECK_STOCK", ok: false,
+        result: { found: true, ref: "REF-0066", stock: 0, available: false },
+        resolvedRef: "REF-0066",
+      },
+      // Yet the real alternative found earlier this turn is still available
+      // as a durable snapshot, independent of lastResult.
+      alternatives: [
+        { ref: "REF-0064", model: "Caftan noir", family: "Caftan", color: "noir", size: "S", price: 450, stock: 9 },
+      ],
+    };
+
+    await generateResponse(state);
+
+    const payload = capturedUserPayload();
+    expect(payload.observation).toEqual({ found: true, available: false, stock: 0 });
+    expect(payload.alternatives).toEqual([
+      { ref: "REF-0064", model: "Caftan noir", family: "Caftan", color: "noir", size: "S", price: 450, stock: 9 },
+    ]);
+  });
+
+  it("never carries a zero-stock or invented alternative — the snapshot only ever holds what the tool actually returned", async () => {
+    mockedFastChat.mockResolvedValueOnce("réponse");
+    const state: M3AKState = { ...baseState, alternatives: [] };
+
+    await generateResponse(state);
+
+    expect(capturedUserPayload().alternatives).toEqual([]);
   });
 });
 

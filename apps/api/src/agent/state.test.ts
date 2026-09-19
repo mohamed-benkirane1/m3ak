@@ -17,6 +17,7 @@ const initialState: M3AKState = {
   cart: null,
   promotion: null,
   delivery: null,
+  alternatives: [],
   cartTotalCents: null,
   nextAction: null,
   activePlan: [],

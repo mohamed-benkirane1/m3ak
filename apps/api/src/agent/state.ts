@@ -68,6 +68,21 @@ const DeliverySnapshotSchema = z.object({
   cashOnDelivery: DeliveryZoneSchema.shape.cashOnDelivery,
   storePickup: DeliveryZoneSchema.shape.storePickup,
 }).strict();
+// TASK-034: durable, turn-scoped snapshot of the most recent real
+// FIND_ALTERNATIVES result — written once by the tool node (graph.ts) the
+// moment that action succeeds, so a later same-turn action (e.g. a planner-
+// issued CHECK_STOCK re-verification) overwriting `lastResult` can never
+// silently erase it before the responder reads it. Mirrors the existing
+// promotion/delivery snapshot pattern exactly.
+const AlternativeProductSnapshotSchema = z.object({
+  ref: TextSchema,
+  model: TextSchema,
+  family: TextSchema,
+  color: TextSchema,
+  size: TextSchema,
+  price: z.number().nonnegative(),
+  stock: z.number().int().nonnegative(),
+}).strict();
 
 // Protect every state field before object parsing, including snapshot inputs.
 // Exported separately (pre-pipe) so LangGraph's StateGraph can read a bare
@@ -88,6 +103,7 @@ export const M3AKStateObjectSchema = z.object({
   cart: CartSnapshotSchema.nullable(),
   promotion: PromotionSnapshotSchema.nullable(),
   delivery: DeliverySnapshotSchema.nullable(),
+  alternatives: z.array(AlternativeProductSnapshotSchema),
   // Validated products subtotal in centimes; excludes delivery. Null is unknown.
   cartTotalCents: CentsSchema.nullable(),
   nextAction: TextSchema.nullable(),

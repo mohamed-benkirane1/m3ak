@@ -187,6 +187,7 @@ describe("/ws/chat session and graph integration", () => {
       cart: null,
       promotion: null,
       delivery: null,
+      alternatives: [],
       cartTotalCents: null,
       nextAction: null,
       activePlan: [],

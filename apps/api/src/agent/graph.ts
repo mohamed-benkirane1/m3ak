@@ -1,4 +1,5 @@
 import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
+import type { Product } from "@m3ak/shared";
 import { loadConversationContext, persistConversation } from "../conversation/conversation";
 import { getCustomerMemory } from "../customer/customerMemory";
 import { langgraphCheckpointer } from "../infrastructure/langgraphCheckpointer";
@@ -292,6 +293,30 @@ async function tool(state: M3AKState, activitySink: AgentActivitySink) {
   }
   if (outcome.orderId) {
     patch.orderId = outcome.orderId;
+  }
+  // TASK-034: captured once, right when FIND_ALTERNATIVES actually succeeds —
+  // never re-derived later from `lastResult`, which a subsequent same-turn
+  // action (e.g. a planner-issued re-check of the original ref) is free to
+  // overwrite. Only a real {ok:true} outcome ever populates this; a missing-
+  // input/negative outcome leaves it at its already-cleared per-turn default.
+  if (action === "FIND_ALTERNATIVES" && outcome.ok) {
+    const result = outcome.result as { alternatives: Product[] };
+    // Mirrors responder.ts's own sanitizeProduct allowlist: a real catalogue
+    // row always has color/size, but a product missing either is dropped
+    // rather than smuggled through with a fabricated placeholder value.
+    patch.alternatives = result.alternatives
+      .filter((product): product is Product & { color: string; size: string } =>
+        typeof product.color === "string" && typeof product.size === "string",
+      )
+      .map((product) => ({
+        ref: product.ref,
+        model: product.model,
+        family: product.family,
+        color: product.color,
+        size: product.size,
+        price: product.price,
+        stock: product.stock,
+      }));
   }
 
   return patch;

@@ -168,6 +168,7 @@ const initialState: M3AKState = {
   cart: null,
   promotion: null,
   delivery: null,
+  alternatives: [],
   cartTotalCents: null,
   nextAction: null,
   activePlan: [],
@@ -451,6 +452,62 @@ describe("loop — revision on failure (3, 4, 16)", () => {
     // revision from the SAME original failure.
     expect(mockedPlanNextActions).toHaveBeenCalledTimes(3);
     expect(mockedExecuteAction).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TASK-034 — out-of-stock sales flow (AC-02)", () => {
+  const outOfStockCaftan = { ref: "REF-0066", model: "Caftan noir", family: "Caftan", color: "noir", size: "L", price: 450, stock: 0 };
+  const realAlternatives = [
+    { ref: "REF-0064", model: "Caftan noir", family: "Caftan", color: "noir", size: "S", price: 450, stock: 9 },
+    { ref: "REF-0065", model: "Caftan noir", family: "Caftan", color: "noir", size: "M", price: 450, stock: 9 },
+  ];
+
+  it("resolves the real zero-stock product, finds a real alternative, and keeps that alternative visible to the responder even after a redundant same-turn stock re-check overwrites lastResult", async () => {
+    mockedPlanNextActions
+      .mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK"] })
+      .mockResolvedValueOnce({ plan: ["FIND_ALTERNATIVES", "CHECK_STOCK"] })
+      .mockResolvedValueOnce({ plan: [] });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [outOfStockCaftan], resolvedRef: "REF-0066" })
+      .mockResolvedValueOnce({ ok: false, result: { found: true, ref: "REF-0066", stock: 0, available: false }, resolvedRef: "REF-0066" })
+      .mockResolvedValueOnce({ ok: true, result: { found: true, source: outOfStockCaftan, alternatives: realAlternatives }, resolvedRef: "REF-0066" })
+      // FIND_ALTERNATIVES never auto-promotes an alternative's ref, so a
+      // planner-issued re-check of "the" resolved product re-confirms the
+      // SAME zero-stock item — exactly the real sequence observed live
+      // against the seeded catalogue.
+      .mockResolvedValueOnce({ ok: false, result: { found: true, ref: "REF-0066", stock: 0, available: false }, resolvedRef: "REF-0066" });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(mockedExecuteAction).toHaveBeenCalledTimes(4);
+    // The tool loop's own final lastResult is the redundant CHECK_STOCK —
+    // reproducing exactly the risk this fix addresses.
+    expect(result.lastResult).toEqual({
+      action: "CHECK_STOCK", ok: false,
+      result: { found: true, ref: "REF-0066", stock: 0, available: false },
+      resolvedRef: "REF-0066",
+    });
+    // The real alternative found earlier this turn survives as a durable
+    // snapshot, independent of lastResult.
+    expect(result.alternatives).toEqual(realAlternatives);
+    // Every retained alternative is genuinely in stock — never zero-stock,
+    // never fabricated.
+    expect(result.alternatives.every((product) => product.stock > 0)).toBe(true);
+    // The responder actually receives it as grounding evidence.
+    expect(mockedGenerateResponse).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ alternatives: realAlternatives }),
+    );
+  });
+
+  it("never populates alternatives when FIND_ALTERNATIVES genuinely finds none (dataset truth, not a fabricated alternative)", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["FIND_ALTERNATIVES"] }).mockResolvedValueOnce({ plan: [] });
+    mockedExecuteAction.mockResolvedValueOnce({
+      ok: false, result: { found: true, source: outOfStockCaftan, alternatives: [] }, resolvedRef: "REF-0066",
+    });
+
+    const result = await invokeSalesGraph(stateWithRef);
+
+    expect(result.alternatives).toEqual([]);
   });
 });
 
