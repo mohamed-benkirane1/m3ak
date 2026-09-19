@@ -173,21 +173,122 @@ describe("worker transport parity (6): timeout/network behavior is unchanged", (
   });
 });
 
-describe("worker fastClient — env var parity with apps/api", () => {
-  it("reads LLM_URL/LLM_API_KEY/LLM_FAST_MODEL lazily, never LLM_REASONING_MODEL", async () => {
-    process.env.LLM_URL = "https://example.test/env-endpoint";
-    process.env.LLM_API_KEY = "test-api-key";
-    process.env.LLM_FAST_MODEL = "fast-model-env";
-    process.env.LLM_REASONING_MODEL = "reasoning-model-should-be-ignored";
+describe("worker transport parity (7): Azure-shaped config (auth header / max tokens)", () => {
+  it("authHeader: 'api-key' sends api-key instead of Authorization", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const client = createFastLlmClient({ ...VALID_CONFIG, authHeader: "api-key" });
+
+    await client.chat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("test-api-key");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("maxTokens, when set, is serialized as max_tokens in the body", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    await createFastLlmClient({ ...VALID_CONFIG, maxTokens: 512 }).chat(VALID_MESSAGES);
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect((JSON.parse(init.body as string) as Record<string, unknown>).max_tokens).toBe(512);
+  });
+
+  it("maxTokens, when omitted, never appears in the body", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    await createFastLlmClient(VALID_CONFIG).chat(VALID_MESSAGES);
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string) as Record<string, unknown>).not.toHaveProperty("max_tokens");
+  });
+});
+
+describe("worker fastChat — Azure GPT-4.1 environment contract, parity with apps/api", () => {
+  const VALID_AZURE_ENV = {
+    AZURE_OPENAI_ENDPOINT: "https://example-resource.openai.azure.com",
+    AZURE_OPENAI_DEPLOYMENT_NAME: "gpt-4.1-deployment",
+    AZURE_OPENAI_API_VERSION: "2024-06-01",
+    AZURE_OPENAI_API_KEY: "test-azure-api-key",
+    AZURE_OPENAI_MAX_TOKENS: "800",
+  };
+
+  function setValidAzureEnv(overrides: Partial<typeof VALID_AZURE_ENV> = {}): void {
+    const merged = { ...VALID_AZURE_ENV, ...overrides };
+    for (const [key, value] of Object.entries(merged)) {
+      process.env[key] = value;
+    }
+  }
+
+  it("constructs the exact Azure chat-completions URL, uses api-key auth, and sends deployment/max_tokens", async () => {
+    setValidAzureEnv();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
     const { fastChat } = await import("./fastClient");
 
     await fastChat(VALID_MESSAGES);
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://example.test/env-endpoint");
+    expect(url).toBe(
+      "https://example-resource.openai.azure.com/openai/deployments/gpt-4.1-deployment/chat/completions?api-version=2024-06-01",
+    );
+    const headers = init.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("test-azure-api-key");
+    expect(headers.Authorization).toBeUndefined();
+    const body = JSON.parse(init.body as string) as { model: string; max_tokens: number };
+    expect(body.model).toBe("gpt-4.1-deployment");
+    expect(body.max_tokens).toBe(800);
+  });
+
+  it("a trailing endpoint slash never produces a double slash", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_ENDPOINT: "https://example-resource.openai.azure.com/" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const { fastChat } = await import("./fastClient");
+
+    await fastChat(VALID_MESSAGES);
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://example-resource.openai.azure.com/openai/deployments/gpt-4.1-deployment/chat/completions?api-version=2024-06-01",
+    );
+  });
+
+  it.each([
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_DEPLOYMENT_NAME",
+    "AZURE_OPENAI_API_VERSION",
+  ] as const)("missing %s -> config_error before fetch", async (missingKey) => {
+    setValidAzureEnv({ [missingKey]: "" } as Partial<typeof VALID_AZURE_ENV>);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { fastChat } = await import("./fastClient");
+
+    await expect(fastChat(VALID_MESSAGES)).rejects.toBeInstanceOf(LlmError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("invalid/zero/negative/non-integer AZURE_OPENAI_MAX_TOKENS -> config_error before fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { fastChat } = await import("./fastClient");
+    for (const invalid of ["0", "-5", "3.5", "not-a-number"]) {
+      setValidAzureEnv({ AZURE_OPENAI_MAX_TOKENS: invalid });
+      await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("never uses LLM_URL/LLM_API_KEY/LLM_FAST_MODEL/LLM_REASONING_MODEL, even if set", async () => {
+    setValidAzureEnv();
+    process.env.LLM_URL = "https://should-be-ignored.test";
+    process.env.LLM_API_KEY = "should-be-ignored-key";
+    process.env.LLM_FAST_MODEL = "should-be-ignored-model";
+    process.env.LLM_REASONING_MODEL = "should-be-ignored-reasoning-model";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const { fastChat } = await import("./fastClient");
+
+    await fastChat(VALID_MESSAGES);
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).not.toContain("should-be-ignored");
     const body = JSON.parse(init.body as string) as { model: string };
-    expect(body.model).toBe("fast-model-env");
-    expect(body.model).not.toBe("reasoning-model-should-be-ignored");
+    expect(body.model).toBe("gpt-4.1-deployment");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
   });
 });

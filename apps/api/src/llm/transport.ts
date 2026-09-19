@@ -15,6 +15,16 @@ export interface ChatTransportConfig {
   url: string;
   apiKey: string;
   model: string;
+  // Provider identity, not caller policy — which header scheme a provider's
+  // REST contract requires (generic OpenAI-compatible vs Azure OpenAI's
+  // api-key header). Omitted/undefined preserves today's exact behavior:
+  // Authorization: Bearer <apiKey>.
+  authHeader?: "bearer" | "api-key";
+  // Provider/deployment identity, not per-call caller policy: sourced once
+  // from a deployment's own env configuration (e.g. AZURE_OPENAI_MAX_TOKENS),
+  // never varies call-to-call in this codebase. Omitted/undefined preserves
+  // today's exact behavior: no max_tokens field in the request body.
+  maxTokens?: number;
 }
 
 // Timeout is client policy (how long THIS caller is willing to wait), never
@@ -77,6 +87,8 @@ const ConfigSchema = z
       ),
     apiKey: z.string().trim().min(1),
     model: z.string().trim().min(1),
+    authHeader: z.enum(["bearer", "api-key"]).optional(),
+    maxTokens: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -146,15 +158,22 @@ export async function requestChatCompletion(
   const messages = MessagesInputSchema.parse(rawMessages);
   const timeoutMs = validateTimeoutMs(options.timeoutMs);
 
+  const authHeaders: Record<string, string> =
+    config.authHeader === "api-key" ? { "api-key": config.apiKey } : { Authorization: `Bearer ${config.apiKey}` };
+  const requestBody: Record<string, unknown> = { model: config.model, messages };
+  if (config.maxTokens !== undefined) {
+    requestBody.max_tokens = config.maxTokens;
+  }
+
   let response: Response;
   try {
     response = await fetch(config.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
+        ...authHeaders,
       },
-      body: JSON.stringify({ model: config.model, messages }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {

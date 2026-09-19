@@ -30,16 +30,51 @@ function readRequiredEnv(name: string): string {
   return value;
 }
 
+// Azure OpenAI's REST contract composes the request URL from the resource
+// endpoint, the deployment name and an api-version query parameter — there
+// is no single flat "base URL" the way a generic OpenAI-compatible provider
+// otherwise expects. Trailing slash(es) are stripped defensively so exactly
+// one slash ever separates the endpoint from the deployment path, regardless
+// of how AZURE_OPENAI_ENDPOINT was entered; the deployment name and api
+// version are both percent-encoded since neither is a repository-controlled
+// constant. Mirrors apps/api's own buildAzureChatCompletionsUrl exactly.
+function buildAzureChatCompletionsUrl(endpoint: string, deployment: string, apiVersion: string): string {
+  const trimmedEndpoint = endpoint.replace(/\/+$/, "");
+  return `${trimmedEndpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+}
+
+// Mirrors apps/api's own parseMaxTokens exactly: a configured-but-malformed
+// value fails explicitly (never silently coerced/defaulted).
+function parseMaxTokens(raw: string): number {
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new LlmError("config_error", `AZURE_OPENAI_MAX_TOKENS must be a positive integer, got "${raw}"`);
+  }
+  return parsed;
+}
+
 // process.env is read lazily, only when this is actually called — importing
 // this module must never fail just because the LLM has not been configured
-// yet. Same env var names as apps/api's fast client (LLM_URL/LLM_API_KEY/
-// LLM_FAST_MODEL) — never LLM_REASONING_MODEL, TASK-028 uses the fast tier
-// only (CLAUDE.md §7 — "réponse conversationnelle simple").
+// yet. TASK-BLOCKER-DUAL-LLM: same official Azure OpenAI GPT-4.1 deployment
+// as apps/api's fast client (AZURE_OPENAI_API_KEY/ENDPOINT/API_VERSION/
+// DEPLOYMENT_NAME/MAX_TOKENS) — never LLM_URL/LLM_API_KEY/LLM_FAST_MODEL/
+// LLM_REASONING_MODEL. The worker has no reasoning tier at all (TASK-028 —
+// CLAUDE.md §7 "réponse conversationnelle simple" stays on the fast tier
+// only), so there is nothing here to keep separate from beyond staying off
+// the API's own generic reasoning credentials.
 export async function fastChat(messages: ChatMessage[]): Promise<string> {
+  const endpoint = readRequiredEnv("AZURE_OPENAI_ENDPOINT");
+  const deployment = readRequiredEnv("AZURE_OPENAI_DEPLOYMENT_NAME");
+  const apiVersion = readRequiredEnv("AZURE_OPENAI_API_VERSION");
+  const apiKey = readRequiredEnv("AZURE_OPENAI_API_KEY");
+  const maxTokens = parseMaxTokens(readRequiredEnv("AZURE_OPENAI_MAX_TOKENS"));
+
   const config: FastLlmClientConfig = {
-    url: readRequiredEnv("LLM_URL"),
-    apiKey: readRequiredEnv("LLM_API_KEY"),
-    model: readRequiredEnv("LLM_FAST_MODEL"),
+    url: buildAzureChatCompletionsUrl(endpoint, deployment, apiVersion),
+    apiKey,
+    model: deployment,
+    authHeader: "api-key",
+    maxTokens,
   };
   return createFastLlmClient(config).chat(messages);
 }

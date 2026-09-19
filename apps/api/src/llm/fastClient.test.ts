@@ -5,6 +5,27 @@ import type { ChatMessage } from "./fastClient";
 const VALID_CONFIG = { url: "https://example.test/custom/full-endpoint", apiKey: "test-api-key", model: "fast-model-1" };
 const VALID_MESSAGES: ChatMessage[] = [{ role: "user", content: "hello" }];
 
+const VALID_AZURE_ENV = {
+  AZURE_OPENAI_ENDPOINT: "https://example-resource.openai.azure.com",
+  AZURE_OPENAI_DEPLOYMENT_NAME: "gpt-4.1-deployment",
+  AZURE_OPENAI_API_VERSION: "2024-06-01",
+  AZURE_OPENAI_API_KEY: "test-azure-api-key",
+  AZURE_OPENAI_MAX_TOKENS: "800",
+};
+
+function setValidAzureEnv(overrides: Partial<typeof VALID_AZURE_ENV> = {}): void {
+  const merged = { ...VALID_AZURE_ENV, ...overrides };
+  for (const [key, value] of Object.entries(merged)) {
+    process.env[key] = value;
+  }
+}
+
+function deleteAzureEnv(): void {
+  for (const key of Object.keys(VALID_AZURE_ENV)) {
+    delete process.env[key];
+  }
+}
+
 function makeFetchResponse(overrides: Partial<{ ok: boolean; status: number; statusText: string; json: () => Promise<unknown> }> = {}) {
   return {
     ok: true,
@@ -28,9 +49,7 @@ afterEach(() => {
 
 describe("createFastLlmClient — config (A-G)", () => {
   it("A: does not depend on process.env at all", async () => {
-    delete process.env.LLM_URL;
-    delete process.env.LLM_API_KEY;
-    delete process.env.LLM_FAST_MODEL;
+    deleteAzureEnv();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
 
     const client = createFastLlmClient(VALID_CONFIG);
@@ -81,51 +100,220 @@ describe("createFastLlmClient — config (A-G)", () => {
   });
 });
 
-describe("fastChat — lazy environment reads (H, I, J, K)", () => {
-  it("H, I, J: fastChat reads LLM_URL/LLM_API_KEY/LLM_FAST_MODEL lazily at call time", async () => {
-    process.env.LLM_URL = "https://example.test/env-endpoint";
-    process.env.LLM_API_KEY = "test-api-key";
-    process.env.LLM_FAST_MODEL = "fast-model-env";
+describe("createFastLlmClient — Azure-shaped config (auth header / max tokens)", () => {
+  it("authHeader: 'api-key' sends api-key instead of Authorization", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const client = createFastLlmClient({ ...VALID_CONFIG, authHeader: "api-key" });
+
+    await client.chat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("test-api-key");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("maxTokens, when set, is serialized as max_tokens in the body", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const client = createFastLlmClient({ ...VALID_CONFIG, maxTokens: 512 });
+
+    await client.chat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(512);
+  });
+
+  it("omitting authHeader/maxTokens preserves today's exact bearer/no-max_tokens behavior", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+    const client = createFastLlmClient(VALID_CONFIG);
+
+    await client.chat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-api-key");
+    expect(headers["api-key"]).toBeUndefined();
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+});
+
+describe("fastChat — Azure GPT-4.1 environment contract", () => {
+  it("1: reads the five AZURE_OPENAI_* variables lazily at call time", async () => {
+    setValidAzureEnv();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
 
     await fastChat(VALID_MESSAGES);
 
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://example.test/env-endpoint");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-api-key");
-    const body = JSON.parse(init.body as string) as { model: string };
-    expect(body.model).toBe("fast-model-env");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("K: LLM_REASONING_MODEL is never read/used", async () => {
-    process.env.LLM_URL = "https://example.test/env-endpoint";
-    process.env.LLM_API_KEY = "test-api-key";
-    process.env.LLM_FAST_MODEL = "fast-model-env";
-    process.env.LLM_REASONING_MODEL = "reasoning-model-should-be-ignored";
+  it("2: the exact Azure chat-completions URL is constructed from endpoint/deployment/api-version", async () => {
+    setValidAzureEnv();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+
+    await fastChat(VALID_MESSAGES);
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://example-resource.openai.azure.com/openai/deployments/gpt-4.1-deployment/chat/completions?api-version=2024-06-01",
+    );
+  });
+
+  it("3: a trailing endpoint slash (single or multiple) never produces a double slash", async () => {
+    for (const endpoint of ["https://example-resource.openai.azure.com/", "https://example-resource.openai.azure.com///"]) {
+      setValidAzureEnv({ AZURE_OPENAI_ENDPOINT: endpoint });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+
+      await fastChat(VALID_MESSAGES);
+
+      const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(
+        "https://example-resource.openai.azure.com/openai/deployments/gpt-4.1-deployment/chat/completions?api-version=2024-06-01",
+      );
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("4: deployment name and api version are percent-encoded", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_DEPLOYMENT_NAME: "my deployment/v1", AZURE_OPENAI_API_VERSION: "2024-06-01-preview&x" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+
+    await fastChat(VALID_MESSAGES);
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `https://example-resource.openai.azure.com/openai/deployments/${encodeURIComponent("my deployment/v1")}/chat/completions?api-version=${encodeURIComponent("2024-06-01-preview&x")}`,
+    );
+    expect(url).not.toContain("my deployment/v1");
+  });
+
+  it("5: uses the api-key header, never Authorization/Bearer", async () => {
+    setValidAzureEnv();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+
+    await fastChat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["api-key"]).toBe("test-azure-api-key");
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("6: request body model is the deployment name", async () => {
+    setValidAzureEnv();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
 
     await fastChat(VALID_MESSAGES);
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as { model: string };
-    expect(body.model).toBe("fast-model-env");
-    expect(body.model).not.toBe("reasoning-model-should-be-ignored");
+    expect(body.model).toBe("gpt-4.1-deployment");
   });
 
-  it("importing fastClient.ts does not fail when no LLM env vars are configured", () => {
-    delete process.env.LLM_URL;
-    delete process.env.LLM_API_KEY;
-    delete process.env.LLM_FAST_MODEL;
-    expect(typeof fastChat).toBe("function");
+  it("7: request body includes max_tokens parsed from AZURE_OPENAI_MAX_TOKENS", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_MAX_TOKENS: "1234" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
+
+    await fastChat(VALID_MESSAGES);
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { max_tokens: number };
+    expect(body.max_tokens).toBe(1234);
   });
 
-  it("fastChat rejects with a config error if env vars are missing at call time", async () => {
-    delete process.env.LLM_URL;
-    delete process.env.LLM_API_KEY;
-    delete process.env.LLM_FAST_MODEL;
+  it("8: missing AZURE_OPENAI_API_KEY -> config_error before fetch", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_API_KEY: "" });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    await expect(fastChat(VALID_MESSAGES)).rejects.toThrow(LlmError);
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("9: missing AZURE_OPENAI_ENDPOINT -> config_error before fetch", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_ENDPOINT: "" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("10: missing AZURE_OPENAI_DEPLOYMENT_NAME -> config_error before fetch", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_DEPLOYMENT_NAME: "" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("11: missing AZURE_OPENAI_API_VERSION -> config_error before fetch", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_API_VERSION: "" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("12: invalid/zero/negative/non-integer AZURE_OPENAI_MAX_TOKENS -> config_error before fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    for (const invalid of ["0", "-5", "3.5", "not-a-number", ""]) {
+      setValidAzureEnv({ AZURE_OPENAI_MAX_TOKENS: invalid });
+      await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("12b: missing AZURE_OPENAI_MAX_TOKENS -> config_error before fetch", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_MAX_TOKENS: "" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "config_error" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("13: no secret value ever appears in a surfaced error message", async () => {
+    setValidAzureEnv({ AZURE_OPENAI_MAX_TOKENS: "not-a-number" });
+    let caught: unknown;
+    try {
+      await fastChat(VALID_MESSAGES);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(LlmError);
+    const message = (caught as Error).message;
+    expect(message).not.toContain("test-azure-api-key");
+    expect(message).not.toContain("api-key");
+  });
+
+  it("13b: an HTTP auth failure never leaks the Azure key in the thrown error", async () => {
+    setValidAzureEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse({ ok: false, status: 401, statusText: "Unauthorized" }));
+
+    let caught: unknown;
+    try {
+      await fastChat(VALID_MESSAGES);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ category: "authentication_error" });
+    const message = (caught as Error).message;
+    expect(message).not.toContain("test-azure-api-key");
+  });
+
+  it("14: a normal successful response still parses correctly", async () => {
+    setValidAzureEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      makeFetchResponse({ json: async () => ({ choices: [{ message: { content: "  réponse Azure  " } }] }) }),
+    );
+
+    await expect(fastChat(VALID_MESSAGES)).resolves.toBe("réponse Azure");
+  });
+
+  it("15: existing network/timeout/protocol error behavior remains intact", async () => {
+    setValidAzureEnv();
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(fastChat(VALID_MESSAGES)).rejects.toMatchObject({ category: "network_error" });
+  });
+
+  it("importing fastClient.ts does not fail when no Azure env vars are configured", () => {
+    deleteAzureEnv();
+    expect(typeof fastChat).toBe("function");
   });
 });
 
@@ -203,7 +391,7 @@ describe("request contract (Q, R, S, T, U, V)", () => {
     expect(headers.Authorization).toBe("Bearer test-api-key");
   });
 
-  it("U: body is exactly {model, messages} — no additional properties", async () => {
+  it("U: body is exactly {model, messages} — no additional properties (when maxTokens is omitted)", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(makeFetchResponse());
     const client = createFastLlmClient(VALID_CONFIG);
 
