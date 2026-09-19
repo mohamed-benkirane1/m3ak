@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./orchestrator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./orchestrator")>();
+  return {
+    ...actual,
+    planNextActions: vi.fn(),
+  };
+});
+
+import { LlmError } from "../llm/reasoningClient";
 import { buildSalesGraph, compileSalesGraph, invokeSalesGraph } from "./graph";
+import { OrchestratorError, planNextActions } from "./orchestrator";
 import type { M3AKState } from "./state";
+
+const mockedPlanNextActions = vi.mocked(planNextActions);
+
+afterEach(() => {
+  vi.resetAllMocks();
+});
 
 const initialState: M3AKState = {
   threadId: "thread-fixture-018",
@@ -98,7 +115,7 @@ describe("buildSalesGraph / compileSalesGraph", () => {
   });
 });
 
-describe("graph topology", () => {
+describe("graph topology — unchanged from TASK-018", () => {
   it("exposes exactly the expected node names via getGraphAsync()", async () => {
     const compiled = compileSalesGraph();
     const drawable = await compiled.getGraphAsync();
@@ -114,15 +131,109 @@ describe("graph topology", () => {
   });
 });
 
-describe("invokeSalesGraph — safe full traversal", () => {
-  it("returns the validated initial state unchanged", async () => {
+describe("router — successful plan", () => {
+  it("stores the plan, sets nextAction to the first step, clears lastError, and leaves every other field unchanged", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"] });
+
     const result = await invokeSalesGraph(initialState);
+
+    expect(result.activePlan).toEqual(["SEARCH_PRODUCTS", "CHECK_STOCK", "RESPOND"]);
+    expect(result.nextAction).toBe("SEARCH_PRODUCTS");
+    expect(result.lastError).toBeNull();
+
+    const { activePlan, nextAction, lastError, ...rest } = result;
+    const { activePlan: _ap, nextAction: _na, lastError: _le, ...restInitial } = initialState;
+    expect(rest).toEqual(restInitial);
+    expect(mockedPlanNextActions).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("router — empty plan", () => {
+  it("sets activePlan to [] and nextAction to null, and the state round-trips unchanged", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: [] });
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.activePlan).toEqual([]);
+    expect(result.nextAction).toBeNull();
+    expect(result.lastError).toBeNull();
     expect(result).toEqual(initialState);
   });
+});
 
-  it("returns a fully populated state unchanged, with no reducer/overwrite drift", async () => {
+describe("router — orchestrator validation error", () => {
+  it("resolves the graph with a safe lastError instead of crashing", async () => {
+    mockedPlanNextActions.mockRejectedValueOnce(
+      new OrchestratorError("schema_mismatch", "Planner response did not match the orchestrator plan schema"),
+    );
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.activePlan).toEqual([]);
+    expect(result.nextAction).toBeNull();
+    expect(result.lastError).toBe("orchestrator_planning_failed: schema_mismatch");
+  });
+
+  it("never contains raw model output or secrets in lastError", async () => {
+    mockedPlanNextActions.mockRejectedValueOnce(new OrchestratorError("invalid_json", "Planner response was not valid JSON"));
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.lastError).toBe("orchestrator_planning_failed: invalid_json");
+  });
+});
+
+describe("router — recognized LLM transport error", () => {
+  it("resolves the graph with a safe category-based lastError instead of crashing", async () => {
+    mockedPlanNextActions.mockRejectedValueOnce(new LlmError("timeout_error", "LLM request timed out after 60000ms"));
+
+    const result = await invokeSalesGraph(initialState);
+
+    expect(result.activePlan).toEqual([]);
+    expect(result.nextAction).toBeNull();
+    expect(result.lastError).toBe("orchestrator_planning_failed: timeout_error");
+  });
+});
+
+describe("router — unexpected errors are not swallowed", () => {
+  it("propagates a programmer bug instead of returning a fake success", async () => {
+    mockedPlanNextActions.mockRejectedValueOnce(new TypeError("unexpected programming error"));
+
+    await expect(invokeSalesGraph(initialState)).rejects.toThrow();
+  });
+});
+
+describe("router — unrelated state fields survive success and failure alike", () => {
+  it("leaves executedSteps, iterationCount, lastResult and guardrail fields untouched on success", async () => {
+    mockedPlanNextActions.mockResolvedValueOnce({ plan: ["CHECK_DELIVERY"] });
+
     const result = await invokeSalesGraph(populatedState);
-    expect(result).toEqual(populatedState);
+
+    expect(result.executedSteps).toEqual(populatedState.executedSteps);
+    expect(result.iterationCount).toBe(populatedState.iterationCount);
+    expect(result.lastResult).toEqual(populatedState.lastResult);
+    expect(result.authorized).toBe(populatedState.authorized);
+    expect(result.clarificationNeeded).toBe(populatedState.clarificationNeeded);
+    expect(result.humanInterventionNeeded).toBe(populatedState.humanInterventionNeeded);
+    expect(result.guardrailReasons).toEqual(populatedState.guardrailReasons);
+    expect(result.cart).toEqual(populatedState.cart);
+    expect(result.orderId).toBe(populatedState.orderId);
+    expect(result.escalationId).toBe(populatedState.escalationId);
+    expect(result.followupId).toBe(populatedState.followupId);
+  });
+
+  it("leaves executedSteps, iterationCount, lastResult and guardrail fields untouched on planning failure", async () => {
+    mockedPlanNextActions.mockRejectedValueOnce(new OrchestratorError("invalid_plan", "A terminal action must be last"));
+
+    const result = await invokeSalesGraph(populatedState);
+
+    expect(result.executedSteps).toEqual(populatedState.executedSteps);
+    expect(result.iterationCount).toBe(populatedState.iterationCount);
+    expect(result.lastResult).toEqual(populatedState.lastResult);
+    expect(result.authorized).toBe(populatedState.authorized);
+    expect(result.clarificationNeeded).toBe(populatedState.clarificationNeeded);
+    expect(result.humanInterventionNeeded).toBe(populatedState.humanInterventionNeeded);
+    expect(result.guardrailReasons).toEqual(populatedState.guardrailReasons);
   });
 });
 
@@ -138,6 +249,7 @@ describe("invokeSalesGraph — outer JSON-safety boundary preserved", () => {
 
     await expect(invokeSalesGraph(stateWithGetter)).rejects.toThrow();
     expect(accessor).not.toHaveBeenCalled();
+    expect(mockedPlanNextActions).not.toHaveBeenCalled();
   });
 
   it("rejects a cyclic lastResult before it ever reaches the graph", async () => {
@@ -145,5 +257,6 @@ describe("invokeSalesGraph — outer JSON-safety boundary preserved", () => {
     cyclic.self = cyclic;
     const stateWithCyclicResult = { ...initialState, lastResult: cyclic };
     await expect(invokeSalesGraph(stateWithCyclicResult)).rejects.toThrow();
+    expect(mockedPlanNextActions).not.toHaveBeenCalled();
   });
 });

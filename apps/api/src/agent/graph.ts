@@ -1,4 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
+import { LlmError } from "../llm/reasoningClient";
+import { OrchestratorError, planNextActions } from "./orchestrator";
 import { M3AKStateObjectSchema, M3AKStateSchema, type M3AKState } from "./state";
 
 // Every TASK-018 node is a structural no-op: it proves graph topology only.
@@ -7,13 +9,38 @@ function noop(_state: M3AKState) {
   return {};
 }
 
+// TASK-019: produces and validates a multi-step plan limited to allowed
+// actions. Does not execute any step of that plan — see TASK-020 for
+// execution, observation, revision and MAX_AGENT_STEPS.
+async function router(state: M3AKState) {
+  try {
+    const { plan } = await planNextActions(state);
+    return {
+      activePlan: plan,
+      nextAction: plan[0] ?? null,
+      lastError: null,
+    };
+  } catch (error) {
+    // Only expected planner/transport failures degrade gracefully into
+    // lastError; anything else is a programmer bug and must propagate.
+    if (error instanceof OrchestratorError || error instanceof LlmError) {
+      return {
+        activePlan: [],
+        nextAction: null,
+        lastError: `orchestrator_planning_failed: ${error.category}`,
+      };
+    }
+    throw error;
+  }
+}
+
 // Uncompiled builder: topology only, no side effects. TASK-024 can compile
 // this same builder with a checkpointer without touching node/edge wiring.
 export function buildSalesGraph() {
   return new StateGraph(M3AKStateObjectSchema)
     .addNode("loadContext", noop)
     .addNode("conversation", noop)
-    .addNode("router", noop)
+    .addNode("router", router)
     .addNode("tool", noop)
     .addNode("guardrail", noop)
     .addNode("response", noop)
