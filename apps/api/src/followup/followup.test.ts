@@ -185,7 +185,8 @@ describe("scheduleFollowup — successful creation (7)", () => {
 
     const insertCall = client.query.mock.calls[5];
     expect(String(insertCall?.[0])).toContain("INSERT INTO followups");
-    const insertParams = insertCall?.[1] as [string, string, Date];
+    const insertParams = insertCall?.[1] as [string, string, Date, string];
+    expect(insertParams[3]).toBe(insertParams[0]); // bullmq_job_id value equals the durable row id, via its own text parameter
     expect(insertParams[0]).toBe(mockAdd.mock.calls[0]?.[2]?.jobId); // same UUID used as id and jobId
     expect(client.query.mock.calls[6]?.[0]).toBe("COMMIT");
   });
@@ -281,6 +282,41 @@ describe("scheduleFollowup — queue.add exact contract (9)", () => {
     expect(typeof opts.delay).toBe("number");
     expect(opts).not.toHaveProperty("attempts");
     expect(opts).not.toHaveProperty("backoff");
+  });
+});
+
+describe("TASK-040 — autonomous followup scheduling", () => {
+  it("persists an eligible followup before enqueueing the delayed BullMQ job", async () => {
+    const client = makeFakeClient();
+    const callOrder: string[] = [];
+    vi.spyOn(postgresPool, "connect").mockResolvedValue(client as never);
+    client.query.mockResolvedValueOnce({}); // BEGIN
+    client.query.mockResolvedValueOnce({ rows: [{ status: "active" }] });
+    client.query.mockResolvedValueOnce({ rows: [] }); // no order
+    client.query.mockResolvedValueOnce({ rows: [] }); // no open escalation
+    client.query.mockResolvedValueOnce({ rows: [] }); // no scheduled followup
+    client.query.mockImplementationOnce((_sql: string, params: unknown[]) => {
+      const [id, conversationId, scheduledAt] = params as [string, string, Date];
+      return Promise.resolve({ rows: [makeFollowupRow({ id, conversation_id: conversationId, scheduled_at: scheduledAt })] });
+    });
+    client.query.mockImplementationOnce(() => {
+      callOrder.push("postgres_commit");
+      return Promise.resolve({});
+    });
+    mockAdd.mockImplementationOnce((_name: string, _data: unknown, opts: { jobId: string }) => {
+      callOrder.push("bullmq_enqueue");
+      return Promise.resolve({ id: opts.jobId });
+    });
+
+    const result = await scheduleFollowup(CONVERSATION_ID);
+
+    expect(result).toMatchObject({ scheduled: true, replayed: false, followup: { status: "scheduled" } });
+    expect(callOrder).toEqual(["postgres_commit", "bullmq_enqueue"]);
+    expect(mockAdd).toHaveBeenCalledExactlyOnceWith(
+      FOLLOWUP_JOB_NAME,
+      { followupId: result.scheduled ? result.followup.id : "unreachable" },
+      { jobId: result.scheduled ? result.followup.id : "unreachable", delay: 5 * 60_000 },
+    );
   });
 });
 
@@ -414,7 +450,9 @@ describe("scheduleFollowup — error propagation / no TASK-028 behavior (12, 14,
     await scheduleFollowup(CONVERSATION_ID);
 
     const insertSql = String(client.query.mock.calls[5]?.[0]);
-    expect(insertSql).toContain("VALUES ($1, $2, $3, NULL, 'scheduled', NULL, $1)");
+    expect(insertSql).toContain("VALUES ($1, $2, $3, NULL, 'scheduled', NULL, $4)");
+    const insertParams = client.query.mock.calls[5]?.[1] as [string, string, Date, string];
+    expect(insertParams[3]).toBe(insertParams[0]);
     expect(mockAdd).toHaveBeenCalledTimes(1);
   });
 });

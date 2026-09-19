@@ -158,9 +158,9 @@ export async function scheduleFollowup(rawConversationId: unknown): Promise<Sche
     const inserted = await withTimeout(
       client.query<FollowupRow>(
         `INSERT INTO followups (id, conversation_id, scheduled_at, executed_at, status, message, bullmq_job_id)
-         VALUES ($1, $2, $3, NULL, 'scheduled', NULL, $1)
+         VALUES ($1, $2, $3, NULL, 'scheduled', NULL, $4)
          RETURNING id, conversation_id, scheduled_at, executed_at, status, message`,
-        [followupId, conversationId, scheduledAt],
+        [followupId, conversationId, scheduledAt, followupId],
       ),
       FOLLOWUP_QUERY_TIMEOUT_MS,
       "scheduleFollowup:insert",

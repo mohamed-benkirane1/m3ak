@@ -520,6 +520,39 @@ describe("executeFollowup — successful atomic transaction (22-28)", () => {
   });
 });
 
+describe("TASK-040 — autonomous followup execution", () => {
+  it("rechecks durable eligibility, generates only from fresh context, and atomically records the customer message", async () => {
+    const preflightClient = makeFakeClient();
+    const finalClient = makeFakeClient();
+    vi.spyOn(postgresPool, "connect").mockResolvedValueOnce(preflightClient as never).mockResolvedValueOnce(finalClient as never);
+    queuePreflightEligible(preflightClient, { cart: true });
+    mockedFastChat.mockResolvedValueOnce("  Bonjour ! Souhaitez-vous continuer votre demande ?  ");
+    queueFinalExecuted(finalClient);
+
+    const result = await executeFollowup(FOLLOWUP_ID);
+
+    expect(result).toEqual({ outcome: "executed" });
+    const llmMessages = mockedFastChat.mock.calls[0]?.[0] ?? [];
+    const payload = JSON.parse(llmMessages.find((message) => message.role === "user")?.content ?? "{}") as Record<string, unknown>;
+    expect(payload).toEqual({
+      language: "french",
+      recentMessages: [{ role: "customer", content: "Bghit veste k7la" }],
+      cart: { items: [{ productRef: "REF-001", quantity: 2 }] },
+    });
+    expect(llmMessages.find((message) => message.role === "system")?.content).toMatch(/Never invent.*price.*stock.*promotion/i);
+
+    expect(finalClient.query.mock.calls[5]?.[1]).toEqual([
+      CONVERSATION_ID,
+      "Bonjour ! Souhaitez-vous continuer votre demande ?",
+    ]);
+    expect(finalClient.query.mock.calls[6]?.[1]).toEqual([
+      FOLLOWUP_ID,
+      "Bonjour ! Souhaitez-vous continuer votre demande ?",
+    ]);
+    expect(finalClient.query.mock.calls[8]?.[0]).toBe("COMMIT");
+  });
+});
+
 describe("executeFollowup — technical error propagation", () => {
   it("a genuine DB error during pre-flight propagates, not swallowed", async () => {
     const client = makeFakeClient();
