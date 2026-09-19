@@ -50,6 +50,11 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function normalizeModelCriterion(productQuery: string, size: string | null): string {
+  if (size === null) return productQuery;
+  return productQuery.replace(/\s+(?:en\s+)?taille\s+[\p{L}\p{N}-]+\s*$/iu, "").trim();
+}
+
 // TASK-025: current-turn extraction.city always wins; customerMemory.city is
 // a fallback used ONLY to supply this CHECK_DELIVERY lookup's input. It is
 // never written back into extraction and never consumed by CREATE_ORDER,
@@ -86,7 +91,7 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
         // product text without promoting it to the catalogue's family slot.
         // Keep that explicit customer text on the deterministic tool path
         // instead of degrading to an ambiguous color/size-only search.
-        criteria.model = state.extraction.productQuery;
+        criteria.model = normalizeModelCriterion(state.extraction.productQuery, state.extraction.size);
       }
       if (state.extraction.color) criteria.color = state.extraction.color;
       if (state.extraction.size) criteria.size = state.extraction.size;
@@ -127,10 +132,11 @@ export async function executeAction(action: AllowedAction, state: M3AKState): Pr
     }
 
     case "CHECK_STOCK": {
-      if (!carriedRef) return missingInput(carriedRef);
-      const result = await getAvailability(carriedRef);
+      const resolvedRef = carriedRef ?? (state.cart?.items.length === 1 ? state.cart.items[0]?.productRef ?? null : null);
+      if (!resolvedRef) return missingInput(resolvedRef);
+      const result = await getAvailability(resolvedRef);
       const ok = result.found && result.available;
-      return { ok, result, resolvedRef: carriedRef };
+      return { ok, result, resolvedRef };
     }
 
     case "FIND_ALTERNATIVES": {

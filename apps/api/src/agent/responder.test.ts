@@ -267,6 +267,28 @@ describe("generateResponse — discount evidence (TASK-036)", () => {
     });
   });
 
+  it("marks an allowed discount with missing quantity for an explicit quantity question", async () => {
+    mockedFastChat.mockResolvedValueOnce("Le prix demandé est autorisé. Quelle quantité souhaitez-vous ?");
+    const state: M3AKState = {
+      ...baseState,
+      extraction: { ...baseState.extraction, quantity: null, requestedPriceMad: 1450 },
+      lastResult: {
+        action: "VALIDATE_DISCOUNT", ok: true,
+        result: {
+          allowed: true, productRef: "REF-0052", basePriceCents: 158000,
+          minimumAllowedPriceCents: 142200, requestedPriceCents: 145000, reason: "within_discretionary_limit",
+        },
+        resolvedRef: "REF-0052",
+      },
+    };
+
+    const result = await generateResponse(state);
+
+    expect(capturedUserPayload().quantityRequired).toBe(true);
+    expect(mockedFastChat.mock.calls[0]?.[0]?.[0]?.content).toMatch(/ask the customer for the missing quantity/i);
+    expect(result.content).toContain("Quelle quantité");
+  });
+
   it("a discount exceeding the limit never surfaces as authorized, and the internal reason string never leaks", async () => {
     mockedFastChat.mockResolvedValueOnce("réponse");
     const state: M3AKState = {

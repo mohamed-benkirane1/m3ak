@@ -150,6 +150,26 @@ describe("executeAction — SEARCH_PRODUCTS", () => {
     expect(outcome.resolvedRef).toBe("REF-0036");
   });
 
+  it("removes a redundant extracted size suffix from the model criterion", async () => {
+    const state: M3AKState = {
+      ...baseState,
+      extraction: {
+        ...baseState.extraction,
+        productQuery: "veste beige taille M",
+        family: null,
+        color: "beige",
+        size: "M",
+        requestedPriceMad: 1050,
+      },
+    };
+    mockedSearchProducts.mockResolvedValueOnce([{ ...product, ref: "REF-0036", model: "Veste beige", color: "beige" }]);
+
+    const outcome = await executeAction("SEARCH_PRODUCTS", state);
+
+    expect(mockedSearchProducts).toHaveBeenCalledExactlyOnceWith({ model: "veste beige", color: "beige", size: "M" });
+    expect(outcome.resolvedRef).toBe("REF-0036");
+  });
+
   it("zero results -> ok:false, resolvedRef null", async () => {
     mockedSearchProducts.mockResolvedValueOnce([]);
     const outcome = await executeAction("SEARCH_PRODUCTS", baseState);
@@ -259,6 +279,42 @@ describe("executeAction — CHECK_STOCK", () => {
 
   it("missing resolvedRef -> no tool call", async () => {
     const outcome = await executeAction("CHECK_STOCK", baseState);
+    expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });
+    expect(mockedGetAvailability).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the sole real cart item on a later order-confirmation turn", async () => {
+    const state: M3AKState = {
+      ...baseState,
+      cart: { id: "cart-1", version: 1, items: [{ productRef: "REF-0036", quantity: 1, unitPrice: 1140 }] },
+    };
+    mockedGetAvailability.mockResolvedValueOnce({ found: true, ref: "REF-0036", stock: 14, available: true });
+
+    const outcome = await executeAction("CHECK_STOCK", state);
+
+    expect(mockedGetAvailability).toHaveBeenCalledExactlyOnceWith("REF-0036");
+    expect(outcome).toEqual({
+      ok: true,
+      result: { found: true, ref: "REF-0036", stock: 14, available: true },
+      resolvedRef: "REF-0036",
+    });
+  });
+
+  it("never guesses a stock ref from an ambiguous multi-item cart", async () => {
+    const state: M3AKState = {
+      ...baseState,
+      cart: {
+        id: "cart-1",
+        version: 1,
+        items: [
+          { productRef: "REF-A", quantity: 1, unitPrice: 100 },
+          { productRef: "REF-B", quantity: 1, unitPrice: 200 },
+        ],
+      },
+    };
+
+    const outcome = await executeAction("CHECK_STOCK", state);
+
     expect(outcome).toEqual({ ok: false, result: { reason: "missing_required_input" }, resolvedRef: null });
     expect(mockedGetAvailability).not.toHaveBeenCalled();
   });

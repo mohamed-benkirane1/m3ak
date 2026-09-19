@@ -112,6 +112,46 @@ describe("extractCustomerRequest — core success cases (A-E)", () => {
     expect(result.confirmation).toBeNull();
   });
 
+  it("recovers an explicit French availability query when the model returns a semantic-null extraction", async () => {
+    mockedFastChat.mockResolvedValueOnce(
+      JSON.stringify(
+        validExtractionJson({
+          intent: "unknown",
+          productQuery: null,
+          color: null,
+          size: null,
+        }),
+      ),
+    );
+
+    const result = await extractCustomerRequest("Est-ce que la veste beige taille M est disponible ?");
+
+    expect(result.intent).toBe("product_search");
+    expect(result.productQuery).toBe("veste beige");
+    expect(result.size).toBe("M");
+    expect(mockedFastChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an explicit delivery intent without inventing a missing city", async () => {
+    mockedFastChat.mockResolvedValueOnce(
+      JSON.stringify(
+        validExtractionJson({
+          intent: "unknown",
+          productQuery: null,
+          color: null,
+          size: null,
+        }),
+      ),
+    );
+
+    const result = await extractCustomerRequest("Combien coûte la livraison pour moi ?");
+
+    expect(result.intent).toBe("delivery_query");
+    expect(result.city).toBeNull();
+    expect(result.productQuery).toBeNull();
+    expect(mockedFastChat).toHaveBeenCalledTimes(1);
+  });
+
   it("TASK-038: classifies a request unrelated to the shop as out_of_domain", async () => {
     mockedFastChat.mockResolvedValueOnce(
       JSON.stringify(validExtractionJson({

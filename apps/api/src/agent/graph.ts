@@ -183,6 +183,15 @@ function isExecutableAction(value: string | null): value is PublicToolAction {
   return value !== null && EXECUTABLE_ACTIONS.has(value);
 }
 
+function hasAllowedDiscountAwaitingQuantity(state: M3AKState): boolean {
+  if (state.extraction.quantity !== null) return false;
+  const lastResult = state.lastResult;
+  if (typeof lastResult !== "object" || lastResult === null || Array.isArray(lastResult)) return false;
+  if (lastResult.action !== "VALIDATE_DISCOUNT" || lastResult.ok !== true) return false;
+  const result = lastResult.result;
+  return typeof result === "object" && result !== null && !Array.isArray(result) && result.allowed === true;
+}
+
 async function planFresh(state: M3AKState) {
   try {
     const { plan } = await planNextActions(state);
@@ -214,6 +223,19 @@ async function router(state: M3AKState) {
     return {
       activePlan: ["ESCALATE" as const],
       nextAction: "ESCALATE" as const,
+      lastError: null,
+    };
+  }
+
+  // The deterministic discount tool has already authorized the requested
+  // price, but cart mutation still requires an explicit quantity. Terminate
+  // the stale remaining planner plan at RESPOND: never default to one, never
+  // spend more tool steps on CREATE_CART/ADD_TO_CART, and never turn a valid
+  // commercial result into an automation-limit escalation.
+  if (hasAllowedDiscountAwaitingQuantity(state)) {
+    return {
+      activePlan: ["RESPOND" as const],
+      nextAction: "RESPOND" as const,
       lastError: null,
     };
   }

@@ -1715,6 +1715,50 @@ describe("TASK-036 — discount negotiation (AC-04)", () => {
     expect(mockedCreateEscalation).not.toHaveBeenCalled();
     expect(result.messages.at(-1)).toEqual({ role: "assistant", content: "Ça marche, 180 dirhams." });
   });
+
+  it("an allowed discount with no quantity responds immediately without cart mutation or escalation", async () => {
+    mockedExtractCustomerRequest.mockResolvedValueOnce({
+      language: "french", intent: "purchase_intent", productQuery: "caftan bordeaux taille L",
+      family: null, color: "bordeaux", size: "L", quantity: null, city: null, address: null,
+      paymentMethod: null, confirmation: null, requestedPriceMad: 1450,
+    });
+    mockedPlanNextActions.mockResolvedValueOnce({
+      plan: ["SEARCH_PRODUCTS", "VALIDATE_DISCOUNT", "CHECK_STOCK", "CHECK_DELIVERY", "CREATE_CART", "ADD_TO_CART"],
+    });
+    mockedExecuteAction
+      .mockResolvedValueOnce({ ok: true, result: [{ ref: "REF-0052" }], resolvedRef: "REF-0052" })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          allowed: true, productRef: "REF-0052", basePriceCents: 158000,
+          minimumAllowedPriceCents: 142200, requestedPriceCents: 145000, reason: "within_discretionary_limit",
+        },
+        resolvedRef: "REF-0052",
+      });
+    mockedGenerateResponse.mockResolvedValueOnce({
+      content: "Le prix de 1 450 dirhams est autorisé. Quelle quantité souhaitez-vous ?",
+    });
+
+    const result = await invokeSalesGraph({
+      ...stateWithDiscountRequest,
+      threadId: "thread-allowed-discount-no-quantity",
+      messages: [{ role: "customer", content: "Je veux un caftan bordeaux taille L à 1450 dirhams" }],
+      extraction: { ...stateWithDiscountRequest.extraction, requestedPriceMad: 1450, quantity: null },
+    });
+
+    expect(result.executedSteps).toEqual(["SEARCH_PRODUCTS", "VALIDATE_DISCOUNT"]);
+    expect(mockedExecuteAction).toHaveBeenCalledTimes(2);
+    expect(mockedExecuteAction).not.toHaveBeenCalledWith("CREATE_CART", expect.anything());
+    expect(mockedExecuteAction).not.toHaveBeenCalledWith("ADD_TO_CART", expect.anything());
+    expect(result.authorized).toBe(true);
+    expect(result.humanInterventionNeeded).toBe(false);
+    expect(result.escalationId).toBeNull();
+    expect(mockedCreateEscalation).not.toHaveBeenCalled();
+    expect(result.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "Le prix de 1 450 dirhams est autorisé. Quelle quantité souhaitez-vous ?",
+    });
+  });
 });
 
 describe("TASK-037 — Darija conversation scenario (AC-01, spec §10)", () => {

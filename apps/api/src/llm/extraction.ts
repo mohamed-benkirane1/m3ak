@@ -88,6 +88,45 @@ function parseModelJson(content: string): unknown {
   }
 }
 
+// A structurally valid extraction can still be semantically empty. Keep the
+// one-call contract, but recover only explicit product-shopping text so an
+// obvious catalogue question cannot reach the responder without DB/tool
+// grounding. The full customer phrase remains data for searchProducts; no
+// catalogue ref, stock, price, or other business fact is inferred here.
+function recoverExplicitCommercialRequest(message: string, extraction: Extraction): Extraction {
+  if (extraction.intent === "unknown" && /\b(?:livraison|livrer|expédition|delivery)\b/iu.test(message)) {
+    return { ...extraction, intent: "delivery_query" };
+  }
+
+  if (
+    extraction.intent === "out_of_domain" ||
+    extraction.productQuery !== null ||
+    extraction.family !== null ||
+    extraction.color !== null
+  ) {
+    return extraction;
+  }
+
+  const hasShoppingCue = /\b(?:disponible|disponibilité|stock|prix|taille|acheter|commander|panier|produit|article|bghit|kayn(?:a)?|taman)\b/iu.test(message);
+  if (!hasShoppingCue) return extraction;
+
+  const productMatch = message.match(
+    /\b(?:la|le|les|un|une|des|bghit)\s+([\p{L}\p{N}'’-]+(?:\s+[\p{L}\p{N}'’-]+)?)(?=\s+(?:taille|est|sont|soit|pour|à|a|wach)\b|[?.,!]|$)/iu,
+  );
+  const sizeMatch = extraction.size === null ? message.match(/\btaille\s+([\p{L}\p{N}-]+)\b/iu) : null;
+  const productQuery = productMatch?.[1]?.trim() ?? null;
+  const size = sizeMatch?.[1]?.trim() ?? extraction.size;
+
+  if (productQuery === null && size === null) return extraction;
+
+  return {
+    ...extraction,
+    intent: extraction.intent === "unknown" ? "product_search" : extraction.intent,
+    productQuery,
+    size,
+  };
+}
+
 // Pure semantic extraction: exactly one fastChat call, no retries, no
 // reasoning fallback, no DB/business-tool access, no catalogue/cart/order
 // side effects. Transport failures (LlmError) propagate unchanged — only a
@@ -106,5 +145,5 @@ export async function extractCustomerRequest(rawMessage: unknown): Promise<Extra
   if (!result.success) {
     throw new ExtractionError("schema_mismatch", "LLM extraction response did not match the extraction schema");
   }
-  return result.data;
+  return recoverExplicitCommercialRequest(message, result.data);
 }
